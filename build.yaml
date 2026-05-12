@@ -1,0 +1,13 @@
+name: "Remote Auth"
+guid: "a3c7e891-f2b4-4d6a-9e58-1b2c3d4e5f60"
+version: "1.0.0.0"
+targetAbi: "10.11.0.0"
+framework: "net9.0"
+owner: "BlackDark"
+overview: "Trusted header SSO with role-based library access control"
+description: "Authenticates Jellyfin users via trusted headers from a reverse proxy (Authentik, Authelia, Traefik, Caddy) with granular group-to-library permission mapping."
+category: "Authentication"
+artifacts:
+  - "Jellyfin.Plugin.RemoteAuth.dll"
+changelog: |-
+  - Initial release: header-based forward auth SSO with RBAC

@@ -1,0 +1,140 @@
+name: '🚀 Release Plugin'
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build Jellyfin Plugin
+        uses: oddstr13/jellyfin-plugin-repository-manager@9497a0a499416cc572ed2e07a391d9f943a37b4d # v1.1.1
+        id: jprm
+        with:
+          dotnet-target: "net9.0"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: build-artifact
+          path: ${{ steps.jprm.outputs.artifact }}
+
+  release:
+    needs: [build]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download Artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: build-artifact
+
+      - name: Generate checksums
+        run: |
+          for file in ./*.zip; do
+            md5sum "${file##./}" >> "${file%.zip}.md5"
+            sha256sum "${file##./}" >> "${file%.zip}.sha256"
+          done
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Create release if it doesn't exist, or upload assets to existing one
+          if gh release view "${TAG}" --repo "${GH_REPO}" > /dev/null 2>&1; then
+            echo "Release ${TAG} already exists — uploading assets"
+            gh release upload "${TAG}" ./* --repo "${GH_REPO}" --clobber
+          else
+            gh release create "${TAG}" ./* --generate-notes --repo "${GH_REPO}"
+          fi
+
+  update-manifest:
+    needs: [release]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: main
+          persist-credentials: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from tag
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+          # Convert semver (1.2.3) to 4-part (1.2.3.0) if needed
+          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            VERSION="${VERSION}.0"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Update manifest.json
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          SOURCE_URL="https://github.com/${REPO}/releases/download/${TAG}/remote-auth_${VERSION}.zip"
+          CHECKSUM=$(curl -sL "${SOURCE_URL}" | md5sum | cut -d' ' -f1)
+
+          # Use jq to update manifest.json — prepend new version entry
+          jq --arg ver "$VERSION" \
+             --arg ts "$TIMESTAMP" \
+             --arg url "$SOURCE_URL" \
+             --arg cs "$CHECKSUM" \
+             --arg cl "Release ${TAG}" \
+            '.[0].versions = [
+              {
+                "version": $ver,
+                "changelog": $cl,
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": $url,
+                "checksum": $cs,
+                "timestamp": $ts
+              }
+            ] + .[0].versions' manifest.json > manifest_new.json
+          mv manifest_new.json manifest.json
+
+      - name: Commit manifest
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+          git add manifest.json
+          git commit -m "chore: update manifest.json for ${TAG}" || exit 0
+          git push
