@@ -2,7 +2,7 @@ PLUGIN_NAME := Jellyfin.Plugin.RemoteAuth
 JELLYFIN_PLUGIN_DIR ?= /var/lib/jellyfin/plugins/RemoteAuth
 BUILD_DIR := dist
 
-.PHONY: build clean install docker-build docker-install package
+.PHONY: build clean install docker-build docker-install package validate-manifest
 
 # Build with local .NET SDK
 build:
@@ -29,3 +29,7 @@ docker-install: docker-build
 package:
 	docker build --target package --output type=local,dest=$(BUILD_DIR) .
 	@echo "Package ready: $(BUILD_DIR)/remote-auth.zip"
+
+# Verify manifest sourceUrl entries are downloadable and checksums match
+validate-manifest:
+	bash scripts/validate-manifest.sh

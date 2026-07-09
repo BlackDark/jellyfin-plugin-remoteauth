@@ -55,6 +55,17 @@ jobs:
           if-no-files-found: error
           path: ${{ steps.jprm.outputs.artifact }}
 
+  validate-manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate manifest source URLs
+        run: bash scripts/validate-manifest.sh
+
   zizmor:
     runs-on: ubuntu-latest
     permissions:

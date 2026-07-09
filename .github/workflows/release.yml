@@ -23,6 +23,17 @@ jobs:
         with:
           dotnet-version: "9.0.x"
 
+      - name: Extract version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        id: version
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            VERSION="${VERSION}.0"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Restore dependencies
         run: dotnet restore
 
@@ -31,6 +42,7 @@ jobs:
         id: jprm
         with:
           dotnet-target: "net9.0"
+          version: ${{ steps.version.outputs.version }}
 
       - name: Upload Artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -103,12 +115,18 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           TAG: ${{ steps.version.outputs.tag }}
           REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          SOURCE_URL="https://github.com/${REPO}/releases/download/${TAG}/remote-auth_${VERSION}.zip"
-          CHECKSUM=$(curl -sL "${SOURCE_URL}" | md5sum | cut -d' ' -f1)
+          ZIP_NAME=$(gh release view "${TAG}" --repo "${REPO}" --json assets -q '.assets[].name' | grep '\.zip$' | head -1)
+          if [ -z "${ZIP_NAME}" ]; then
+            echo "::error::No .zip asset found on release ${TAG}"
+            exit 1
+          fi
 
-          # Use jq to update manifest.json — prepend new version entry
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          SOURCE_URL="https://github.com/${REPO}/releases/download/${TAG}/${ZIP_NAME}"
+          CHECKSUM=$(curl -fsSL "${SOURCE_URL}" | md5sum | cut -d' ' -f1)
+
           jq --arg ver "$VERSION" \
              --arg ts "$TIMESTAMP" \
              --arg url "$SOURCE_URL" \
@@ -126,6 +144,8 @@ jobs:
             ] + .[0].versions' manifest.json > manifest_new.json
           mv manifest_new.json manifest.json
 
+          sed -i "s/^version: .*/version: \"${VERSION}\"/" build.yaml
+
       - name: Commit manifest
         env:
           TAG: ${{ steps.version.outputs.tag }}
@@ -135,6 +155,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
-          git add manifest.json
+          git add manifest.json build.yaml
           git commit -m "chore: update manifest.json for ${TAG}" || exit 0
           git push
