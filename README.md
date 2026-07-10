@@ -166,6 +166,79 @@ Go to **Admin Dashboard → Plugins → Remote Auth**.
 
 Map IdP group names to Jellyfin permissions. Multiple matched groups are merged (union semantics — most permissive wins).
 
+### Config File (Backup & Automation)
+
+Plugin settings are stored as **XML** on the Jellyfin server (not in this repository). The admin UI reads and writes this file via Jellyfin's plugin system.
+
+| Install | Path |
+|---------|------|
+| Linux (package) | `/var/lib/jellyfin/plugins/configurations/Jellyfin.Plugin.RemoteAuth.xml` |
+| Docker | `/config/plugins/configurations/Jellyfin.Plugin.RemoteAuth.xml` |
+| macOS | `~/Library/Application Support/jellyfin/plugins/configurations/Jellyfin.Plugin.RemoteAuth.xml` |
+| Windows (tray) | `%ProgramData%\Jellyfin\Server\plugins\configurations\Jellyfin.Plugin.RemoteAuth.xml` |
+
+The file is created when you first save settings in the dashboard. Until then, defaults from `PluginConfiguration.cs` apply.
+
+**Backup before upgrades:**
+
+```bash
+# Linux
+sudo cp /var/lib/jellyfin/plugins/configurations/Jellyfin.Plugin.RemoteAuth.xml{,.bak}
+
+# Docker
+docker cp jellyfin:/config/plugins/configurations/Jellyfin.Plugin.RemoteAuth.xml ./remote-auth-config.xml.bak
+```
+
+Jellyfin retains plugin settings across plugin updates as long as this file is not deleted.
+
+**Apply config automatically** (GitOps, Ansible, cloud-init, etc.):
+
+1. Configure once in the UI (or copy from an existing server).
+2. Copy the XML to your target path before or after plugin install.
+3. Restart Jellyfin — file edits do not hot-reload.
+
+```bash
+# Example: deploy pre-built config on Docker start
+install -d -m 755 /config/plugins/configurations
+install -m 600 remote-auth-config.xml /config/plugins/configurations/Jellyfin.Plugin.RemoteAuth.xml
+```
+
+**Example structure** (values will match your setup):
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<PluginConfiguration>
+  <Enabled>true</Enabled>
+  <SecretHeaderName>X-Remote-Auth-Secret</SecretHeaderName>
+  <SecretHeaderValue>your-shared-secret</SecretHeaderValue>
+  <UserHeader>X-Remote-Auth-User</UserHeader>
+  <EmailHeader>X-Remote-Auth-Email</EmailHeader>
+  <DisplayNameHeader>X-Remote-Auth-Name</DisplayNameHeader>
+  <GroupsHeader>X-Remote-Auth-Groups</GroupsHeader>
+  <GroupsDelimiter>|</GroupsDelimiter>
+  <AdminGroup>jellyfin-admins</AdminGroup>
+  <AutoCreateUsers>true</AutoCreateUsers>
+  <DefaultRoleName>viewer</DefaultRoleName>
+  <RoleMappings>
+    <RoleMapping>
+      <RoleName>viewer</RoleName>
+      <IsAdmin>false</IsAdmin>
+      <EnableAllLibraries>true</EnableAllLibraries>
+      <LibraryIds />
+      <LibraryNames />
+      <EnableMediaPlayback>true</EnableMediaPlayback>
+      <EnableRemoteAccess>true</EnableRemoteAccess>
+      <EnableTranscoding>true</EnableTranscoding>
+      <Priority>0</Priority>
+    </RoleMapping>
+  </RoleMappings>
+</PluginConfiguration>
+```
+
+To resolve library GUIDs for `LibraryIds`, use **Admin → Plugins → Remote Auth** or `GET /sso/RemoteAuth/Config/Libraries` while logged in as admin.
+
+> **Note:** `SecretHeaderValue` is stored in plain text. Restrict file permissions (`chmod 600`) and treat the XML like a secret.
+
 ## Reverse Proxy Examples
 
 ### Authentik + Traefik
@@ -311,6 +384,29 @@ Users managed by this plugin have password login disabled. If you need to allow 
 | GET | `/sso/RemoteAuth/Login` | Secret header | Header-based login (called by proxy) |
 | GET | `/sso/RemoteAuth/Config/Libraries` | Admin | List available libraries |
 | GET | `/sso/RemoteAuth/Config/Status` | Admin | Plugin status |
+
+## Releases
+
+Releases are automated with [release-please](https://github.com/googleapis/release-please) from [Conventional Commits](https://www.conventionalcommits.org/) on `main`.
+
+| Commit prefix | Version bump |
+|---|---|
+| `fix:` | patch (`1.0.1` → `1.0.2`) |
+| `feat:` | minor (`1.0.1` → `1.1.0`) |
+| `feat!:` / `fix!:` / `BREAKING CHANGE:` | major (`1.0.1` → `2.0.0`) |
+
+**Flow:**
+
+1. Push conventional commits to `main`
+2. release-please opens/updates a **Release PR** (version + `CHANGELOG.md`)
+3. Merge the Release PR → tag `v1.0.2` + GitHub release created
+4. `release.yml` builds the plugin zip, uploads assets, updates `manifest.json`
+
+Git tags use 3-part semver (`v1.0.2`). Jellyfin manifest uses 4-part plugin versions (`1.0.2.0`) — the release workflow pads automatically.
+
+```bash
+make validate-manifest   # verify manifest URLs/checksums before shipping
+```
 
 ## Building
 
