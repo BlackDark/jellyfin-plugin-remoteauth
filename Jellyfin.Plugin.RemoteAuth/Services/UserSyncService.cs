@@ -38,7 +38,6 @@ public class UserSyncService
             }
 
             user = await _userManager.CreateUserAsync(username).ConfigureAwait(false);
-            user.AuthenticationProviderId = typeof(Auth.RemoteAuthProvider).FullName!;
 
             // Set a random password — nobody will ever use it, login goes through the proxy
             var randomPassword = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
@@ -47,6 +46,7 @@ public class UserSyncService
             _logger.LogInformation("Created new Remote Auth user: {Username}", username);
         }
 
+        user.AuthenticationProviderId = typeof(Auth.RemoteAuthProvider).FullName!;
         user.SetPermission(PermissionKind.IsDisabled, false);
         await _userManager.UpdateUserAsync(user).ConfigureAwait(false);
         await _rbacService.ApplyRoleMappingsAsync(user.Id, roles).ConfigureAwait(false);

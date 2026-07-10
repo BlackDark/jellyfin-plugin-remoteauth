@@ -1,4 +1,6 @@
+using Jellyfin.Plugin.RemoteAuth.Auth;
 using MediaBrowser.Controller;
+using MediaBrowser.Controller.Authentication;
 using MediaBrowser.Controller.Plugins;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -8,6 +10,7 @@ public class ServiceRegistrator : IPluginServiceRegistrator
 {
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
+        serviceCollection.AddSingleton<IAuthenticationProvider, RemoteAuthProvider>();
         serviceCollection.AddScoped<RbacService>();
         serviceCollection.AddScoped<UserSyncService>();
     }

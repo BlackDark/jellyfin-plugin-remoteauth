@@ -58,19 +58,40 @@ public class RbacService
 
         if (matchedMappings.Count == 0)
         {
-            _logger.LogInformation("No role mappings matched for user {Username} with roles [{Roles}]",
-                user.Username, string.Join(", ", userRoles));
+            if (IsAdminGroupMember(config, userRoles))
+            {
+                user.SetPermission(PermissionKind.IsAdministrator, true);
+                user.SetPermission(PermissionKind.EnableAllFolders, true);
+                await _userManager.UpdateUserAsync(user).ConfigureAwait(false);
+                _logger.LogInformation(
+                    "Applied AdminGroup shortcut for user {Username}: admin=true (group={AdminGroup})",
+                    user.Username,
+                    config.AdminGroup);
+            }
+            else if (!string.IsNullOrWhiteSpace(config.AdminGroup))
+            {
+                user.SetPermission(PermissionKind.IsAdministrator, false);
+                user.SetPermission(PermissionKind.EnableAllFolders, false);
+                user.SetPreference(PreferenceKind.EnabledFolders, Array.Empty<string>());
+                await _userManager.UpdateUserAsync(user).ConfigureAwait(false);
+                _logger.LogInformation(
+                    "Revoked AdminGroup admin for user {Username} (group={AdminGroup})",
+                    user.Username,
+                    config.AdminGroup);
+            }
+            else
+            {
+                _logger.LogInformation("No role mappings matched for user {Username} with roles [{Roles}]",
+                    user.Username, string.Join(", ", userRoles));
+            }
+
             return;
         }
 
         var merged = MergeMappings(matchedMappings);
 
         // AdminGroup shortcut: if config.AdminGroup is set and user is in it, force admin
-        var isAdmin = merged.IsAdmin;
-        if (!isAdmin && !string.IsNullOrWhiteSpace(config.AdminGroup))
-        {
-            isAdmin = userRoles.Contains(config.AdminGroup, StringComparer.OrdinalIgnoreCase);
-        }
+        var isAdmin = merged.IsAdmin || IsAdminGroupMember(config, userRoles);
 
         user.SetPermission(PermissionKind.IsAdministrator, isAdmin);
         user.SetPermission(PermissionKind.EnableMediaPlayback, merged.EnableMediaPlayback);
@@ -141,6 +162,12 @@ public class RbacService
         }
 
         return resolved.ToList();
+    }
+
+    private static bool IsAdminGroupMember(PluginConfiguration config, string[] userRoles)
+    {
+        return !string.IsNullOrWhiteSpace(config.AdminGroup)
+            && userRoles.Contains(config.AdminGroup, StringComparer.OrdinalIgnoreCase);
     }
 
     private static RoleMapping MergeMappings(List<RoleMapping> mappings)
