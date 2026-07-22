@@ -160,6 +160,7 @@ Go to **Admin Dashboard → Plugins → Remote Auth**.
 | Groups Delimiter | `\|` | Delimiter used in the groups header |
 | Admin Group | *(empty)* | Shortcut: users in this group always get admin |
 | Auto-create Users | true | Create Jellyfin accounts on first login |
+| Allow password login | true | Hybrid: keep `AuthenticateByName` (Infuse). Off = force Remote Auth-only after SSO |
 | Default Role | *(empty)* | Fallback role when no groups match; **blank = deny (403)** |
 
 ### Role Mappings Tab
@@ -385,14 +386,28 @@ Login and Quick Connect HTML honor Jellyfin's **Base URL** / path prefix (`Reque
 
 Deployments under a subpath (e.g. `https://example.com/jellyfin`) work without client-side path hacks.
 
-## Quick Connect (native / TV apps)
+## Password login vs Quick Connect
 
-Remote Auth users cannot use password login. For native and TV clients, use **Quick Connect**:
+| Client | How to sign in |
+|--------|----------------|
+| Browser (proxy SSO) | `/sso/RemoteAuth/Login` — always works when headers + RBAC match |
+| Infuse / apps with only username+password | Enable **Allow password login** (default on). Set a Jellyfin password for the user. Next successful SSO migrates accounts off `RemoteAuthProvider` if needed. |
+| Official Jellyfin apps with Quick Connect | Optional; see below. Not required when hybrid password is on. |
+
+**Allow password login** (plugin General settings, default **on**): hybrid mode — SSO + local password. Password path bypasses IdP MFA.
+
+Turn it **off** for Remote Auth-only accounts (password `AuthenticateByName` blocked after successful SSO).
+
+## Quick Connect (native / TV apps that support it)
+
+When password login is disabled, or for clients that support it, use **Quick Connect**:
 
 1. Enable **Quick Connect** in Jellyfin (**Dashboard → General → Quick Connect**).
 2. Protect `/sso/RemoteAuth/QuickConnect` **and** `POST /sso/RemoteAuth/QuickConnect/Authorize` the same way as Login (proxy must inject secret + identity headers on both).
 3. Open `/sso/RemoteAuth/QuickConnect` in a browser behind the proxy (or have the proxy send the user there).
 4. Enter the Quick Connect code shown in the app; the browser POSTs to Authorize (proxy re-attaches headers). Username in headers must match the QC session. After 5 bad codes the session is invalidated.
+
+> **Infuse** does not support Jellyfin Quick Connect — use hybrid password login instead.
 
 Same secret, username, and groups headers as Login. Unmatched users still get **403**.
 

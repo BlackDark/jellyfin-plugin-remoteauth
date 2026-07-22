@@ -2,6 +2,8 @@ using System;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
 using Jellyfin.Database.Implementations.Entities;
+using Jellyfin.Plugin.RemoteAuth.Auth;
+using Jellyfin.Plugin.RemoteAuth.Configuration;
 using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.Logging;
 
@@ -23,14 +25,25 @@ public class UserSyncService
         _logger = logger;
     }
 
-    public async Task<Guid> SyncUserAsync(string username, string? displayName, string[] roles)
+    public Task<Guid> SyncUserAsync(string username, string? displayName, string[] roles)
+    {
+        var config = RemoteAuthPlugin.Instance?.Configuration
+            ?? throw new InvalidOperationException("Remote Auth plugin is not loaded");
+
+        return SyncUserAsync(username, displayName, roles, config);
+    }
+
+    internal async Task<Guid> SyncUserAsync(
+        string username,
+        string? displayName,
+        string[] roles,
+        PluginConfiguration config)
     {
         var user = _userManager.GetUserByName(username);
 
         if (user == null)
         {
-            var config = RemoteAuthPlugin.Instance?.Configuration;
-            if (config?.AutoCreateUsers != true)
+            if (config.AutoCreateUsers != true)
             {
                 throw new InvalidOperationException(
                     $"User '{username}' does not exist and auto-creation is disabled");
@@ -38,7 +51,8 @@ public class UserSyncService
 
             user = await _userManager.CreateUserAsync(username).ConfigureAwait(false);
 
-            // Set a random password — nobody will ever use it, login goes through the proxy
+            // Standing password for hybrid / Infuse. User (or admin) must set a known password
+            // in Jellyfin if they need AuthenticateByName — random value is unknown by design.
             var randomPassword = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
             await _userManager.ChangePassword(user.Id, randomPassword).ConfigureAwait(false);
 
@@ -47,18 +61,52 @@ public class UserSyncService
 
         var userId = user.Id;
 
-        // RBAC first: deny must not leave AuthenticationProviderId switched (password lockout).
-        // Permissions persist via UpdatePolicyAsync inside RbacService.
+        // RBAC first: deny must not leave AuthenticationProviderId switched.
         await _rbacService.ApplyRoleMappingsAsync(userId, roles).ConfigureAwait(false);
 
-        // Only after a successful role match: force Remote Auth provider (blocks password login).
-        // CreateUserAsync + ChangePassword advance the concurrency token — re-fetch + retry.
-        await UpdateUserResilientAsync(
-            userId,
-            u => u.AuthenticationProviderId = typeof(Auth.RemoteAuthProvider).FullName!)
-            .ConfigureAwait(false);
+        await ApplyAuthenticationProviderAsync(userId, config).ConfigureAwait(false);
 
         return userId;
+    }
+
+    private async Task ApplyAuthenticationProviderAsync(Guid userId, PluginConfiguration config)
+    {
+        var remoteAuthId = AuthenticationProviderIds.RemoteAuth;
+        var defaultId = AuthenticationProviderIds.Default;
+
+        var current = _userManager.GetUserById(userId)
+            ?? throw new InvalidOperationException($"User '{userId}' not found during sync");
+
+        string? desired;
+        if (config.AllowPasswordLogin)
+        {
+            // Hybrid: migrate RemoteAuth-locked users back to Default so Infuse works.
+            // Leave other providers (custom) untouched.
+            desired = string.Equals(current.AuthenticationProviderId, remoteAuthId, StringComparison.Ordinal)
+                ? defaultId
+                : null;
+        }
+        else
+        {
+            desired = remoteAuthId;
+        }
+
+        if (desired == null
+            || string.Equals(current.AuthenticationProviderId, desired, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        await UpdateUserResilientAsync(
+            userId,
+            u => u.AuthenticationProviderId = desired)
+            .ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "Set AuthenticationProviderId for user {UserId} to {Provider} (AllowPasswordLogin={AllowPasswordLogin})",
+            userId,
+            desired,
+            config.AllowPasswordLogin);
     }
 
     internal async Task UpdateUserResilientAsync(Guid userId, Action<User> mutate)

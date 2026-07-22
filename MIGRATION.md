@@ -16,16 +16,21 @@ Every successful login re-applies RBAC from matched role mappings (and Default R
 - Manual permission/library edits in Jellyfin are overwritten on next SSO login.
 - Put intended access in **Role Mappings**, not only in the Jellyfin user editor.
 
-## AuthenticationProviderId takeover
+## AuthenticationProviderId / password login
 
-Only **after RBAC succeeds** (matched role / Default Role / Admin Group) does the plugin set `AuthenticationProviderId` to the Remote Auth provider.
+Config: **Allow password login** (`AllowPasswordLogin`, default **on** = hybrid).
 
-- Denied sync (403) does **not** change the auth provider — existing password login stays intact.
-- On success, password login for that user is **disabled** (`RemoteAuthProvider` rejects `AuthenticateByName`).
-- Web SSO: `/sso/RemoteAuth/Login` (proxy headers).
-- Native/TV apps: Quick Connect via `/sso/RemoteAuth/QuickConnect` (Jellyfin Quick Connect must be enabled).
+| Mode | Behavior |
+|------|----------|
+| **On (hybrid)** | Do not force Remote Auth provider. Users stuck on `RemoteAuthProvider` are migrated back to Default on next successful SSO. Infuse/`AuthenticateByName` works if the Jellyfin password is known. |
+| **Off** | After successful RBAC, force `RemoteAuthProvider` — password login disabled. Use Quick Connect for native apps that support it. |
 
-To restore password login for a user, clear/change their auth provider in Jellyfin (or remove Remote Auth) — this plugin re-forces the provider on each **successful** sync.
+- Web SSO always uses `AuthenticateDirect` (no password check) either way.
+- **New auto-created users** get a random unknown password — set one in Jellyfin (Dashboard → Users) before Infuse can log in.
+- Users who already had a Jellyfin password before Remote Auth takeover usually keep that hash after migration back to Default.
+- Hybrid password login **bypasses IdP MFA** — accepted tradeoff when the setting is on.
+
+Native/TV apps with Quick Connect: `/sso/RemoteAuth/QuickConnect` (Jellyfin Quick Connect must be enabled). Infuse does **not** support Quick Connect — use hybrid password instead.
 
 ## Disabled users
 

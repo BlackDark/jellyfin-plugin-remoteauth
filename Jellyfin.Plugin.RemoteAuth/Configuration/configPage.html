@@ -80,6 +80,17 @@
                                 <span>Auto-create users on first login</span>
                             </label>
                         </div>
+                        <div class="ra-field full">
+                            <label>
+                                <input type="checkbox" id="allowPasswordLogin" />
+                                <span>Allow password login (hybrid — Infuse / AuthenticateByName)</span>
+                            </label>
+                            <p style="color:#aaa;font-size:0.85em;margin:0.4em 0 0;">
+                                On by default. Remote Auth SSO still works. Password login stays enabled for TV apps like Infuse.
+                                Turn off to force Remote Auth-only (blocks password after successful SSO).
+                                Password login bypasses IdP MFA — accepted tradeoff for hybrid mode.
+                            </p>
+                        </div>
                         <div class="ra-field">
                             <label for="defaultRoleName">Default Role (fallback when no groups match)</label>
                             <input type="text" id="defaultRoleName" placeholder="e.g. viewer" />
