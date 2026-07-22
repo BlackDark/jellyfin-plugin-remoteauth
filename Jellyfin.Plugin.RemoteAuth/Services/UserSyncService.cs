@@ -47,16 +47,16 @@ public class UserSyncService
 
         var userId = user.Id;
 
-        // AuthenticationProviderId is a scalar on the User row. CreateUserAsync + ChangePassword
-        // advance the concurrency token, so re-fetch + retry on conflict. Always force provider
-        // (RemoteAuth design — unlike OIDC which only sets it for new users).
+        // RBAC first: deny must not leave AuthenticationProviderId switched (password lockout).
+        // Permissions persist via UpdatePolicyAsync inside RbacService.
+        await _rbacService.ApplyRoleMappingsAsync(userId, roles).ConfigureAwait(false);
+
+        // Only after a successful role match: force Remote Auth provider (blocks password login).
+        // CreateUserAsync + ChangePassword advance the concurrency token — re-fetch + retry.
         await UpdateUserResilientAsync(
             userId,
             u => u.AuthenticationProviderId = typeof(Auth.RemoteAuthProvider).FullName!)
             .ConfigureAwait(false);
-
-        // RBAC persists IsDisabled/permissions via UpdatePolicyAsync.
-        await _rbacService.ApplyRoleMappingsAsync(userId, roles).ConfigureAwait(false);
 
         return userId;
     }

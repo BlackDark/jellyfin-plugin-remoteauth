@@ -30,7 +30,7 @@ public class SessionHtmlTests
     {
         var html = SessionHtml.BuildQuickConnectHtml("session-token", "/jellyfin");
 
-        Assert.Contains("const token = 'session-token';", html);
+        Assert.Contains("const token = \"session-token\";", html);
         Assert.Contains("fetch(basePath + '/sso/RemoteAuth/QuickConnect/Authorize'", html);
         Assert.Contains("const basePath = \"/jellyfin\";", html);
         Assert.DoesNotContain("providerId", html);

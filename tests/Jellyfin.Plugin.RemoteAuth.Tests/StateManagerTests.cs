@@ -68,4 +68,23 @@ public class StateManagerTests
         sut.InvalidateAuthorizedSession(token);
         Assert.Null(sut.PeekAuthorizedSession(token));
     }
+
+    [Fact]
+    public void FailedCodeAttempts_CanIncrementUntilMax()
+    {
+        var session = new AuthorizedSession
+        {
+            Username = "dave",
+            Roles = [],
+            UserId = Guid.NewGuid()
+        };
+
+        for (var i = 0; i < AuthorizedSession.MaxFailedCodeAttempts; i++)
+        {
+            session.FailedCodeAttempts++;
+        }
+
+        Assert.Equal(AuthorizedSession.MaxFailedCodeAttempts, session.FailedCodeAttempts);
+        Assert.True(session.FailedCodeAttempts >= AuthorizedSession.MaxFailedCodeAttempts);
+    }
 }

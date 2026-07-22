@@ -18,13 +18,14 @@ Every successful login re-applies RBAC from matched role mappings (and Default R
 
 ## AuthenticationProviderId takeover
 
-On sync, the plugin sets `AuthenticationProviderId` to the Remote Auth provider.
+Only **after RBAC succeeds** (matched role / Default Role / Admin Group) does the plugin set `AuthenticationProviderId` to the Remote Auth provider.
 
-- Password login for that user is **disabled** (`RemoteAuthProvider` rejects `AuthenticateByName`).
+- Denied sync (403) does **not** change the auth provider — existing password login stays intact.
+- On success, password login for that user is **disabled** (`RemoteAuthProvider` rejects `AuthenticateByName`).
 - Web SSO: `/sso/RemoteAuth/Login` (proxy headers).
 - Native/TV apps: Quick Connect via `/sso/RemoteAuth/QuickConnect` (Jellyfin Quick Connect must be enabled).
 
-To restore password login for a user, clear/change their auth provider in Jellyfin (or remove Remote Auth) — this plugin always re-forces the provider on successful sync.
+To restore password login for a user, clear/change their auth provider in Jellyfin (or remove Remote Auth) — this plugin re-forces the provider on each **successful** sync.
 
 ## Disabled users
 

@@ -43,7 +43,7 @@ The comparison is done in **constant time** (`CryptographicOperations.FixedTimeE
 
 **The secret alone is not sufficient.** An attacker who can reach the endpoint directly and brute-force or guess the secret could authenticate as any user.
 
-**You must** ensure that only your reverse proxy can reach `/sso/RemoteAuth/Login`.
+**You must** ensure that only your reverse proxy can reach `/sso/RemoteAuth/Login`, `/sso/RemoteAuth/QuickConnect`, and `/sso/RemoteAuth/QuickConnect/Authorize`.
 
 **Docker / Docker Compose**
 
@@ -390,9 +390,9 @@ Deployments under a subpath (e.g. `https://example.com/jellyfin`) work without c
 Remote Auth users cannot use password login. For native and TV clients, use **Quick Connect**:
 
 1. Enable **Quick Connect** in Jellyfin (**Dashboard → General → Quick Connect**).
-2. Protect `/sso/RemoteAuth/QuickConnect` the same way as Login (proxy + secret + identity headers).
+2. Protect `/sso/RemoteAuth/QuickConnect` **and** `POST /sso/RemoteAuth/QuickConnect/Authorize` the same way as Login (proxy must inject secret + identity headers on both).
 3. Open `/sso/RemoteAuth/QuickConnect` in a browser behind the proxy (or have the proxy send the user there).
-4. Enter the Quick Connect code shown in the app; the plugin authorizes it via `POST /sso/RemoteAuth/QuickConnect/Authorize`.
+4. Enter the Quick Connect code shown in the app; the browser POSTs to Authorize (proxy re-attaches headers). Username in headers must match the QC session. After 5 bad codes the session is invalidated.
 
 Same secret, username, and groups headers as Login. Unmatched users still get **403**.
 
@@ -400,9 +400,9 @@ Same secret, username, and groups headers as Login. Unmatched users still get **
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| GET | `/sso/RemoteAuth/Login` | Secret header | Header-based web login (called by proxy) |
-| GET | `/sso/RemoteAuth/QuickConnect` | Secret header | QC UI after header auth + RBAC |
-| POST | `/sso/RemoteAuth/QuickConnect/Authorize` | Session token | Authorize a Quick Connect code |
+| GET | `/sso/RemoteAuth/Login` | Secret + identity headers | Header-based web login (called by proxy) |
+| GET | `/sso/RemoteAuth/QuickConnect` | Secret + identity headers | QC UI after header auth + RBAC |
+| POST | `/sso/RemoteAuth/QuickConnect/Authorize` | Secret + identity headers + session token | Authorize a Quick Connect code |
 | GET | `/sso/RemoteAuth/Config/Libraries` | Admin | List available libraries |
 | GET | `/sso/RemoteAuth/Config/Status` | Admin | Plugin status |
 

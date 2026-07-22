@@ -25,7 +25,7 @@ public class RbacService
         _logger = logger;
     }
 
-    public Task ApplyRoleMappingsAsync(Guid userId, string[] userRoles)
+    public virtual Task ApplyRoleMappingsAsync(Guid userId, string[] userRoles)
     {
         var config = RemoteAuthPlugin.Instance?.Configuration;
         if (config == null)
