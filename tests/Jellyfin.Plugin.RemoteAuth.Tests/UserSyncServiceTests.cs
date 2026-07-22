@@ -100,6 +100,45 @@ public class UserSyncServiceTests
         _userManager.Verify(m => m.UpdateUserAsync(user), Times.Exactly(2));
     }
 
+    [Fact]
+    public async Task SyncUser_WhenRbacDenies_DoesNotChangeAuthenticationProvider()
+    {
+        var user = CreateUser("eve");
+        user.AuthenticationProviderId = "Jellyfin.Server.Implementations.Users.DefaultAuthenticationProvider";
+        _userManager.Setup(m => m.GetUserByName("eve")).Returns(user);
+
+        var denyingRbac = new DenyingRbacService(
+            _userManager.Object,
+            _libraryManager.Object);
+
+        var sut = new UserSyncService(
+            _userManager.Object,
+            denyingRbac,
+            NullLogger<UserSyncService>.Instance);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            sut.SyncUserAsync("eve", displayName: null, roles: []));
+
+        Assert.Contains("denied", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            "Jellyfin.Server.Implementations.Users.DefaultAuthenticationProvider",
+            user.AuthenticationProviderId);
+        _userManager.Verify(m => m.UpdateUserAsync(It.IsAny<User>()), Times.Never);
+    }
+
+    private sealed class DenyingRbacService : RbacService
+    {
+        public DenyingRbacService(IUserManager userManager, ILibraryManager libraryManager)
+            : base(userManager, libraryManager, NullLogger<RbacService>.Instance)
+        {
+        }
+
+        public override Task ApplyRoleMappingsAsync(Guid userId, string[] userRoles)
+        {
+            throw new InvalidOperationException("No role mapping matched for user 'eve' — denied");
+        }
+    }
+
     private static User CreateUser(string username) => new(username, "auth", "reset");
 
     /// <summary>

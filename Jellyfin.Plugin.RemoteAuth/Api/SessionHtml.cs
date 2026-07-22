@@ -53,6 +53,7 @@ public static class SessionHtml
     public static string BuildQuickConnectHtml(string sessionToken, string basePath)
     {
         var basePathJson = JsonSerializer.Serialize(basePath ?? "");
+        var sessionTokenJson = JsonSerializer.Serialize(sessionToken);
 
         return $$"""
         <!DOCTYPE html>
@@ -90,7 +91,7 @@ public static class SessionHtml
         </div>
         <script>
         (function() {
-            const token = '{{sessionToken}}';
+            const token = {{sessionTokenJson}};
             const basePath = {{basePathJson}};
             const codeInput = document.getElementById('code');
             const button = document.getElementById('submit');
@@ -105,6 +106,7 @@ public static class SessionHtml
                 msg.className = '';
                 msg.textContent = 'Authorizing...';
 
+                // Proxy must inject secret + identity headers on this POST (same as Login/QC GET).
                 fetch(basePath + '/sso/RemoteAuth/QuickConnect/Authorize', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },

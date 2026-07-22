@@ -9,11 +9,16 @@ namespace Jellyfin.Plugin.RemoteAuth.Services;
 
 public sealed class AuthorizedSession
 {
+    public const int MaxFailedCodeAttempts = 5;
+
     public required string Username { get; init; }
     public string? DisplayName { get; init; }
     public required string[] Roles { get; init; }
     public required Guid UserId { get; init; }
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
+
+    /// <summary>Failed Quick Connect code attempts; session invalidated at <see cref="MaxFailedCodeAttempts"/>.</summary>
+    public int FailedCodeAttempts { get; set; }
 }
 
 public sealed class StateManager : IHostedService, IDisposable

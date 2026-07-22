@@ -146,7 +146,8 @@ public class RemoteAuthController : ControllerBase
     }
 
     /// <summary>
-    /// Authorizes a pending Quick Connect request using the identity established by header auth.
+    /// Authorizes a pending Quick Connect request. Requires the same secret + identity headers as
+    /// Login (proxy must inject them on this POST too), matching the QC session username.
     /// </summary>
     [HttpPost("QuickConnect/Authorize")]
     public async Task<ActionResult> QuickConnectAuthorize([FromBody] QuickConnectAuthorizeRequest request)
@@ -156,15 +157,33 @@ public class RemoteAuthController : ControllerBase
             return BadRequest("Missing session token or code");
         }
 
+        // Secret + identity before peeking the session token (no unauthenticated capability URL).
+        var auth = TryAuthenticateHeaders();
+        if (auth.Error != null)
+        {
+            return auth.Error;
+        }
+
+        var identity = auth.Identity!.Value;
+
+        if (!_quickConnect.IsEnabled)
+        {
+            return BadRequest("Quick Connect is not enabled on this server. An administrator can enable it under Dashboard > General.");
+        }
+
         var session = _stateManager.PeekAuthorizedSession(request.Token);
         if (session == null)
         {
             return Unauthorized("Session expired. Please sign in again.");
         }
 
-        if (!_quickConnect.IsEnabled)
+        if (!string.Equals(session.Username, identity.Username, StringComparison.OrdinalIgnoreCase))
         {
-            return BadRequest("Quick Connect is not enabled on this server. An administrator can enable it under Dashboard > General.");
+            _logger.LogWarning(
+                "RemoteAuth: Quick Connect identity mismatch session={SessionUser} header={HeaderUser}",
+                session.Username,
+                identity.Username);
+            return Unauthorized("Identity mismatch");
         }
 
         var code = request.Code.Trim();
@@ -174,12 +193,15 @@ public class RemoteAuthController : ControllerBase
             var authorized = await _quickConnect.AuthorizeRequest(session.UserId, code).ConfigureAwait(false);
             if (!authorized)
             {
-                return BadRequest("Quick Connect authorization was rejected.");
+                return FailQuickConnectCode(request.Token, session, "Quick Connect authorization was rejected.");
             }
         }
         catch (Exception ex) when (ex.GetType().Name == "ResourceNotFoundException")
         {
-            return BadRequest("That code wasn't recognized. Check the code on your device and try again.");
+            return FailQuickConnectCode(
+                request.Token,
+                session,
+                "That code wasn't recognized. Check the code on your device and try again.");
         }
         catch (Exception ex) when (ex.GetType().Name == "AuthenticationException")
         {
@@ -190,6 +212,22 @@ public class RemoteAuthController : ControllerBase
         _logger.LogInformation("RemoteAuth: Quick Connect authorized for user {Username}", session.Username);
 
         return Ok(new { success = true });
+    }
+
+    private ActionResult FailQuickConnectCode(string token, AuthorizedSession session, string message)
+    {
+        session.FailedCodeAttempts++;
+        if (session.FailedCodeAttempts >= AuthorizedSession.MaxFailedCodeAttempts)
+        {
+            _stateManager.InvalidateAuthorizedSession(token);
+            _logger.LogWarning(
+                "RemoteAuth: Quick Connect session invalidated after {Attempts} failed codes for {Username}",
+                session.FailedCodeAttempts,
+                session.Username);
+            return BadRequest("Too many invalid codes. Reload Quick Connect and try again.");
+        }
+
+        return BadRequest(message);
     }
 
     private string GetBasePath()
