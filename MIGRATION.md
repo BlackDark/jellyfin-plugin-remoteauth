@@ -38,6 +38,6 @@ On a **successful** mapped login, RBAC sets `IsDisabled = false`.
 If the user has **no** matching role mapping, **no** usable Default Role, and does not get access via Admin Group:
 
 - Login returns **403** — no session, sticky perms not left behind.
-- Access **auto-heals** on the next request after the IdP grants a group that matches a Role Mapping (or Default Role / Admin Group applies).
+- Access **auto-heals** on the next login after the IdP grants a group that matches a Role Mapping (or Default Role / Admin Group applies).
 
 Leave **Default Role** blank for strict deny. Set a Default Role only when unmatched users should still get a fallback mapping.
