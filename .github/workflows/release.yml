@@ -144,6 +144,20 @@ jobs:
             ] + .[0].versions' manifest.json > manifest_new.json
           mv manifest_new.json manifest.json
 
+          jq --arg ver "$VERSION" \
+             --arg ts "$TIMESTAMP" \
+             --arg cl "Release ${TAG}" \
+            '.versions = [
+              {
+                "version": $ver,
+                "changelog": $cl,
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "",
+                "timestamp": $ts
+              }
+            ] + .versions' Jellyfin.Plugin.RemoteAuth/meta.json > meta_new.json
+          mv meta_new.json Jellyfin.Plugin.RemoteAuth/meta.json
+
           sed -i "s/^version: .*/version: \"${VERSION}\"/" build.yaml
 
       - name: Commit manifest
@@ -155,6 +169,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
-          git add manifest.json build.yaml
-          git commit -m "chore: update manifest.json for ${TAG}" || exit 0
+          git add manifest.json build.yaml Jellyfin.Plugin.RemoteAuth/meta.json
+          git commit -m "chore: update manifest and meta.json for ${TAG}" || exit 0
           git push
