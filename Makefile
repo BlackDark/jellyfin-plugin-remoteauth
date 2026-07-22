@@ -2,11 +2,14 @@ PLUGIN_NAME := Jellyfin.Plugin.RemoteAuth
 JELLYFIN_PLUGIN_DIR ?= /var/lib/jellyfin/plugins/RemoteAuth
 BUILD_DIR := dist
 
-.PHONY: build clean install docker-build docker-install package validate-manifest
+.PHONY: build clean install docker-build docker-install package validate-manifest test
 
 # Build with local .NET SDK
 build:
 	dotnet publish $(PLUGIN_NAME)/$(PLUGIN_NAME).csproj -c Release -o $(BUILD_DIR)
+
+test:
+	dotnet test jellyfin-plugin-remote-auth.sln -c Release --nologo
 
 clean:
 	rm -rf $(BUILD_DIR)

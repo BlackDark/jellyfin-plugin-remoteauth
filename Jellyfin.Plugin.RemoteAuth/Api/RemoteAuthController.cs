@@ -1,7 +1,6 @@
 using System;
-using System.Security.Cryptography;
-using System.Text;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.RemoteAuth.Auth;
 using Jellyfin.Plugin.RemoteAuth.Services;
 using MediaBrowser.Controller.Authentication;
 using MediaBrowser.Controller.Session;
@@ -57,7 +56,7 @@ public class RemoteAuthController : ControllerBase
 
         var incomingSecret = Request.Headers[secretHeaderName].ToString();
 
-        if (!ConstantTimeEquals(incomingSecret, config.SecretHeaderValue))
+        if (!SecretComparer.Equals(incomingSecret, config.SecretHeaderValue))
         {
             _logger.LogWarning("RemoteAuth: invalid or missing secret header from {RemoteIp}",
                 HttpContext.Connection.RemoteIpAddress);
@@ -122,31 +121,6 @@ public class RemoteAuthController : ControllerBase
             _logger.LogError(ex, "RemoteAuth: authentication failed for user {Username}", username);
             return StatusCode(500, "Authentication failed");
         }
-    }
-
-    /// <summary>
-    /// Constant-time string comparison to prevent timing-based secret inference.
-    /// Note: the early length check does leak whether lengths match, but this is
-    /// unavoidable without HMAC. For a shared secret this is acceptable — the
-    /// important property is that same-length secrets cannot be brute-forced
-    /// character-by-character via timing.
-    /// </summary>
-    private static bool ConstantTimeEquals(string a, string b)
-    {
-        if (a == null || b == null)
-        {
-            return false;
-        }
-
-        var aBytes = Encoding.UTF8.GetBytes(a);
-        var bBytes = Encoding.UTF8.GetBytes(b);
-
-        if (aBytes.Length != bBytes.Length)
-        {
-            return false;
-        }
-
-        return CryptographicOperations.FixedTimeEquals(aBytes, bBytes);
     }
 
     private static string BuildSuccessHtml(AuthenticationResult authResult)
