@@ -38,7 +38,7 @@ public static class RoleMatchResolver
             .OrderByDescending(m => m.Priority)
             .ToList();
 
-        if (matched.Count == 0 && !string.IsNullOrEmpty(defaultRoleName))
+        if (matched.Count == 0 && !string.IsNullOrWhiteSpace(defaultRoleName))
         {
             var defaultMapping = roleMappings
                 .FirstOrDefault(m => string.Equals(m.RoleName, defaultRoleName, StringComparison.OrdinalIgnoreCase));

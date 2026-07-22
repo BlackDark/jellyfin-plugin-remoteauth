@@ -102,4 +102,35 @@ public class RoleMatchResolverTests
         Assert.Equal(RoleMatchKind.Matched, result.Kind);
         Assert.Single(result.Mappings);
     }
+
+    [Fact]
+    public void Resolve_DefaultRoleNameWhitespace_FallsThroughToDeny()
+    {
+        var mappings = new List<RoleMapping>
+        {
+            new() { RoleName = "   ", Priority = 1 },
+        };
+
+        var result = RoleMatchResolver.Resolve(
+            mappings,
+            defaultRoleName: "   ",
+            adminGroup: null,
+            userRoles: []);
+
+        Assert.Equal(RoleMatchKind.Deny, result.Kind);
+        Assert.False(result.RevokeAdminShortcut);
+    }
+
+    [Fact]
+    public void Resolve_DefaultRoleNameSetButNoMapping_FallsThroughToDeny()
+    {
+        var result = RoleMatchResolver.Resolve(
+            roleMappings: [new RoleMapping { RoleName = "viewer" }],
+            defaultRoleName: "guest",
+            adminGroup: null,
+            userRoles: ["other"]);
+
+        Assert.Equal(RoleMatchKind.Deny, result.Kind);
+        Assert.False(result.RevokeAdminShortcut);
+    }
 }
