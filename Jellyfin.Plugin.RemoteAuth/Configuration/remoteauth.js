@@ -128,6 +128,7 @@ function loadStatus(view) {
             '<p><strong>Plugin version:</strong> ' + esc(s.PluginVersion) + '</p>' +
             '<p><strong>Role mappings:</strong> ' + s.RoleMappingCount + '</p>' +
             '<p><strong>Auto-create users:</strong> ' + (s.AutoCreateUsers ? 'Yes' : 'No') + '</p>' +
+            '<p><strong>Allow password login:</strong> ' + (s.AllowPasswordLogin ? 'Yes (hybrid)' : 'No (Remote Auth only)') + '</p>' +
             '<p><strong>Default role:</strong> ' + esc(s.DefaultRoleName || '(none)') + '</p>';
     }).catch(function () {
         var el = view.querySelector('#statusContent');
@@ -160,6 +161,7 @@ export default function (view) {
             view.querySelector('#groupsDelimiter').value = cfg.GroupsDelimiter || '|';
             view.querySelector('#adminGroup').value = cfg.AdminGroup || '';
             view.querySelector('#autoCreateUsers').checked = cfg.AutoCreateUsers !== false;
+            view.querySelector('#allowPasswordLogin').checked = cfg.AllowPasswordLogin !== false;
             view.querySelector('#defaultRoleName').value = cfg.DefaultRoleName || '';
 
             renderRoleMappings(view);
@@ -218,6 +220,7 @@ export default function (view) {
         cfg.GroupsDelimiter = gval(view, 'groupsDelimiter');
         cfg.AdminGroup = gval(view, 'adminGroup');
         cfg.AutoCreateUsers = gchk(view, 'autoCreateUsers');
+        cfg.AllowPasswordLogin = gchk(view, 'allowPasswordLogin');
         cfg.DefaultRoleName = gval(view, 'defaultRoleName');
         cfg.RoleMappings = collectRoleMappings(view);
         ApiClient.updatePluginConfiguration(pluginId, cfg).then(function (result) {

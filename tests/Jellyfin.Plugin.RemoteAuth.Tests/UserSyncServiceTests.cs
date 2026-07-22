@@ -1,5 +1,6 @@
 using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Plugin.RemoteAuth.Auth;
+using Jellyfin.Plugin.RemoteAuth.Configuration;
 using Jellyfin.Plugin.RemoteAuth.Services;
 using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -11,16 +12,15 @@ public class UserSyncServiceTests
 {
     private readonly Mock<IUserManager> _userManager = new();
     private readonly Mock<ILibraryManager> _libraryManager = new();
-    private readonly UserSyncService _sut;
 
-    public UserSyncServiceTests()
+    private UserSyncService CreateSut(RbacService? rbac = null)
     {
-        var rbac = new RbacService(
+        rbac ??= new RbacService(
             _userManager.Object,
             _libraryManager.Object,
             NullLogger<RbacService>.Instance);
 
-        _sut = new UserSyncService(
+        return new UserSyncService(
             _userManager.Object,
             rbac,
             NullLogger<UserSyncService>.Instance);
@@ -29,15 +29,16 @@ public class UserSyncServiceTests
     [Fact]
     public async Task UpdateUserResilient_SucceedsOnFirstAttempt()
     {
+        var sut = CreateSut();
         var user = CreateUser("alice");
         _userManager.Setup(m => m.GetUserById(user.Id)).Returns(user);
         _userManager.Setup(m => m.UpdateUserAsync(user)).Returns(Task.CompletedTask);
 
-        await _sut.UpdateUserResilientAsync(
+        await sut.UpdateUserResilientAsync(
             user.Id,
-            u => u.AuthenticationProviderId = typeof(RemoteAuthProvider).FullName!);
+            u => u.AuthenticationProviderId = AuthenticationProviderIds.RemoteAuth);
 
-        Assert.Equal(typeof(RemoteAuthProvider).FullName, user.AuthenticationProviderId);
+        Assert.Equal(AuthenticationProviderIds.RemoteAuth, user.AuthenticationProviderId);
         _userManager.Verify(m => m.GetUserById(user.Id), Times.Once);
         _userManager.Verify(m => m.UpdateUserAsync(user), Times.Once);
     }
@@ -45,6 +46,7 @@ public class UserSyncServiceTests
     [Fact]
     public async Task UpdateUserResilient_RetriesAfterConcurrencyThenSucceeds()
     {
+        var sut = CreateSut();
         var user = CreateUser("bob");
         _userManager.Setup(m => m.GetUserById(user.Id)).Returns(user);
         _userManager
@@ -52,11 +54,11 @@ public class UserSyncServiceTests
             .ThrowsAsync(new DbUpdateConcurrencyException())
             .Returns(Task.CompletedTask);
 
-        await _sut.UpdateUserResilientAsync(
+        await sut.UpdateUserResilientAsync(
             user.Id,
-            u => u.AuthenticationProviderId = typeof(RemoteAuthProvider).FullName!);
+            u => u.AuthenticationProviderId = AuthenticationProviderIds.RemoteAuth);
 
-        Assert.Equal(typeof(RemoteAuthProvider).FullName, user.AuthenticationProviderId);
+        Assert.Equal(AuthenticationProviderIds.RemoteAuth, user.AuthenticationProviderId);
         _userManager.Verify(m => m.GetUserById(user.Id), Times.Exactly(2));
         _userManager.Verify(m => m.UpdateUserAsync(user), Times.Exactly(2));
     }
@@ -64,6 +66,7 @@ public class UserSyncServiceTests
     [Fact]
     public async Task UpdateUserResilient_RethrowsAfterThreeConcurrencyFailures()
     {
+        var sut = CreateSut();
         var user = CreateUser("carol");
         _userManager.Setup(m => m.GetUserById(user.Id)).Returns(user);
         _userManager
@@ -71,59 +74,91 @@ public class UserSyncServiceTests
             .ThrowsAsync(new DbUpdateConcurrencyException());
 
         await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() =>
-            _sut.UpdateUserResilientAsync(
+            sut.UpdateUserResilientAsync(
                 user.Id,
-                u => u.AuthenticationProviderId = typeof(RemoteAuthProvider).FullName!));
+                u => u.AuthenticationProviderId = AuthenticationProviderIds.RemoteAuth));
 
         _userManager.Verify(m => m.GetUserById(user.Id), Times.Exactly(3));
         _userManager.Verify(m => m.UpdateUserAsync(user), Times.Exactly(3));
     }
 
     [Fact]
-    public async Task SyncUser_ExistingUser_SetsProviderViaResilientUpdate()
+    public async Task SyncUser_AllowPasswordLoginFalse_ForcesRemoteAuthProvider()
     {
+        var sut = CreateSut(new NoOpRbacService(_userManager.Object, _libraryManager.Object));
         var user = CreateUser("dave");
-        user.AuthenticationProviderId = "old-provider";
+        user.AuthenticationProviderId = AuthenticationProviderIds.Default;
         _userManager.Setup(m => m.GetUserByName("dave")).Returns(user);
         _userManager.Setup(m => m.GetUserById(user.Id)).Returns(user);
-        _userManager
-            .SetupSequence(m => m.UpdateUserAsync(user))
-            .ThrowsAsync(new DbUpdateConcurrencyException())
-            .Returns(Task.CompletedTask);
+        _userManager.Setup(m => m.UpdateUserAsync(user)).Returns(Task.CompletedTask);
 
-        // Plugin.Instance null → RBAC no-ops; still proves provider resilient path ran.
-        var id = await _sut.SyncUserAsync("dave", displayName: null, roles: ["viewer"]);
+        var config = new PluginConfiguration { AllowPasswordLogin = false, AutoCreateUsers = true };
+        var id = await sut.SyncUserAsync("dave", displayName: null, roles: ["viewer"], config);
 
         Assert.Equal(user.Id, id);
-        Assert.Equal(typeof(RemoteAuthProvider).FullName, user.AuthenticationProviderId);
-        _userManager.Verify(m => m.GetUserById(user.Id), Times.Exactly(2));
-        _userManager.Verify(m => m.UpdateUserAsync(user), Times.Exactly(2));
+        Assert.Equal(AuthenticationProviderIds.RemoteAuth, user.AuthenticationProviderId);
+        _userManager.Verify(m => m.UpdateUserAsync(user), Times.Once);
+    }
+
+    [Fact]
+    public async Task SyncUser_AllowPasswordLoginTrue_MigratesRemoteAuthBackToDefault()
+    {
+        var sut = CreateSut(new NoOpRbacService(_userManager.Object, _libraryManager.Object));
+        var user = CreateUser("infuse");
+        user.AuthenticationProviderId = AuthenticationProviderIds.RemoteAuth;
+        _userManager.Setup(m => m.GetUserByName("infuse")).Returns(user);
+        _userManager.Setup(m => m.GetUserById(user.Id)).Returns(user);
+        _userManager.Setup(m => m.UpdateUserAsync(user)).Returns(Task.CompletedTask);
+
+        var config = new PluginConfiguration { AllowPasswordLogin = true };
+        await sut.SyncUserAsync("infuse", displayName: null, roles: ["viewer"], config);
+
+        Assert.Equal(AuthenticationProviderIds.Default, user.AuthenticationProviderId);
+        _userManager.Verify(m => m.UpdateUserAsync(user), Times.Once);
+    }
+
+    [Fact]
+    public async Task SyncUser_AllowPasswordLoginTrue_LeavesDefaultProviderUntouched()
+    {
+        var sut = CreateSut(new NoOpRbacService(_userManager.Object, _libraryManager.Object));
+        var user = CreateUser("local");
+        user.AuthenticationProviderId = AuthenticationProviderIds.Default;
+        _userManager.Setup(m => m.GetUserByName("local")).Returns(user);
+        _userManager.Setup(m => m.GetUserById(user.Id)).Returns(user);
+
+        var config = new PluginConfiguration { AllowPasswordLogin = true };
+        await sut.SyncUserAsync("local", displayName: null, roles: ["viewer"], config);
+
+        Assert.Equal(AuthenticationProviderIds.Default, user.AuthenticationProviderId);
+        _userManager.Verify(m => m.UpdateUserAsync(It.IsAny<User>()), Times.Never);
     }
 
     [Fact]
     public async Task SyncUser_WhenRbacDenies_DoesNotChangeAuthenticationProvider()
     {
         var user = CreateUser("eve");
-        user.AuthenticationProviderId = "Jellyfin.Server.Implementations.Users.DefaultAuthenticationProvider";
+        user.AuthenticationProviderId = AuthenticationProviderIds.Default;
         _userManager.Setup(m => m.GetUserByName("eve")).Returns(user);
 
-        var denyingRbac = new DenyingRbacService(
-            _userManager.Object,
-            _libraryManager.Object);
-
-        var sut = new UserSyncService(
-            _userManager.Object,
-            denyingRbac,
-            NullLogger<UserSyncService>.Instance);
+        var sut = CreateSut(new DenyingRbacService(_userManager.Object, _libraryManager.Object));
+        var config = new PluginConfiguration { AllowPasswordLogin = false };
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            sut.SyncUserAsync("eve", displayName: null, roles: []));
+            sut.SyncUserAsync("eve", displayName: null, roles: [], config));
 
         Assert.Contains("denied", ex.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(
-            "Jellyfin.Server.Implementations.Users.DefaultAuthenticationProvider",
-            user.AuthenticationProviderId);
+        Assert.Equal(AuthenticationProviderIds.Default, user.AuthenticationProviderId);
         _userManager.Verify(m => m.UpdateUserAsync(It.IsAny<User>()), Times.Never);
+    }
+
+    private sealed class NoOpRbacService : RbacService
+    {
+        public NoOpRbacService(IUserManager userManager, ILibraryManager libraryManager)
+            : base(userManager, libraryManager, NullLogger<RbacService>.Instance)
+        {
+        }
+
+        public override Task ApplyRoleMappingsAsync(Guid userId, string[] userRoles) => Task.CompletedTask;
     }
 
     private sealed class DenyingRbacService : RbacService
@@ -141,8 +176,5 @@ public class UserSyncServiceTests
 
     private static User CreateUser(string username) => new(username, "auth", "reset");
 
-    /// <summary>
-    /// Stand-in matching EF Core exception type name (caught by name, not assembly).
-    /// </summary>
     private sealed class DbUpdateConcurrencyException : Exception;
 }

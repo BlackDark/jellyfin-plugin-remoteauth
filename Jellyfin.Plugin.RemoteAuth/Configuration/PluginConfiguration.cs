@@ -30,6 +30,15 @@ public class PluginConfiguration : BasePluginConfiguration
 
     public bool AutoCreateUsers { get; set; } = true;
 
+    /// <summary>
+    /// When true (default / hybrid): keep Jellyfin password login for Infuse and similar
+    /// <c>AuthenticateByName</c> clients. Successful Remote Auth SSO still works via
+    /// <c>AuthenticateDirect</c>. Users previously forced onto RemoteAuthProvider are migrated
+    /// back to DefaultAuthenticationProvider on the next successful SSO.
+    /// When false: force RemoteAuthProvider after successful RBAC (password login disabled).
+    /// </summary>
+    public bool AllowPasswordLogin { get; set; } = true;
+
     public string DefaultRoleName { get; set; } = string.Empty;
 
     public List<RoleMapping> RoleMappings { get; set; } = new();

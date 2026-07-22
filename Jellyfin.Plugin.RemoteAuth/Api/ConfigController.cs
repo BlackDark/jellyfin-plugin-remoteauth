@@ -35,6 +35,7 @@ public class ConfigController : ControllerBase
             Configured = !string.IsNullOrWhiteSpace(config?.SecretHeaderValue),
             RoleMappingCount = config?.RoleMappings.Count ?? 0,
             AutoCreateUsers = config?.AutoCreateUsers ?? false,
+            AllowPasswordLogin = config?.AllowPasswordLogin ?? true,
             DefaultRoleName = config?.DefaultRoleName ?? string.Empty
         });
     }
