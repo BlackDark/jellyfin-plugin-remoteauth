@@ -103,6 +103,11 @@ public class RemoteAuthController : ControllerBase
     [HttpGet("QuickConnect")]
     public async Task<ActionResult> QuickConnect()
     {
+        if (!_quickConnect.IsEnabled)
+        {
+            return BadRequest("Quick Connect is not enabled on this server. An administrator can enable it under Dashboard > General.");
+        }
+
         var auth = TryAuthenticateHeaders();
         if (auth.Error != null)
         {

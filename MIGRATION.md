@@ -37,7 +37,9 @@ On a **successful** mapped login, RBAC sets `IsDisabled = false`.
 
 If the user has **no** matching role mapping, **no** usable Default Role, and does not get access via Admin Group:
 
-- Login returns **403** — no session, sticky perms not left behind.
+- Login returns **403** — no session.
+- If **Admin Group** is configured and the user is not in it, admin/folder access from that shortcut is revoked before the 403.
+- If Admin Group is blank, existing Jellyfin permissions are left unchanged in the DB (still no session until a mapping matches).
 - Access **auto-heals** on the next login after the IdP grants a group that matches a Role Mapping (or Default Role / Admin Group applies).
 
 Leave **Default Role** blank for strict deny. Set a Default Role only when unmatched users should still get a fallback mapping.
