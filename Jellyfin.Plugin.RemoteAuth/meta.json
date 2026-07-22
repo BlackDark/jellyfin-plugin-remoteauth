@@ -7,6 +7,13 @@
   "category": "Authentication",
   "versions": [
     {
+      "version": "1.2.0.0",
+      "changelog": "Release v1.2.0",
+      "targetAbi": "10.11.0.0",
+      "sourceUrl": "",
+      "timestamp": "2026-07-22T21:17:49Z"
+    },
+    {
       "version": "1.1.0.0",
       "changelog": "Release v1.1.0",
       "targetAbi": "10.11.0.0",
