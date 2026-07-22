@@ -58,7 +58,7 @@ function renderRoleMappings(view) {
         card.innerHTML = '<h4>Role: ' + esc(m.RoleName || 'New Role') + '</h4>' +
             '<div class="ra-grid">' +
             fld('Role / Group Name', 'text', 'role_name_' + idx, m.RoleName, 'Must match group value from IdP') +
-            fld('Priority', 'number', 'role_priority_' + idx, m.Priority || 0, 'Higher = takes precedence') +
+            fld('Priority', 'number', 'role_priority_' + idx, m.Priority || 0, 'Higher = sorted first; union merge still applies') +
             '</div>' +
             '<div class="ra-checkbox-row">' +
             chk('role_admin_' + idx, 'Administrator', m.IsAdmin) +

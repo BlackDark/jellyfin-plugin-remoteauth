@@ -1,8 +1,7 @@
 using System;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
-using Jellyfin.Data;
-using Jellyfin.Database.Implementations.Enums;
+using Jellyfin.Database.Implementations.Entities;
 using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.Logging;
 
@@ -46,11 +45,44 @@ public class UserSyncService
             _logger.LogInformation("Created new Remote Auth user: {Username}", username);
         }
 
-        user.AuthenticationProviderId = typeof(Auth.RemoteAuthProvider).FullName!;
-        user.SetPermission(PermissionKind.IsDisabled, false);
-        await _userManager.UpdateUserAsync(user).ConfigureAwait(false);
-        await _rbacService.ApplyRoleMappingsAsync(user.Id, roles).ConfigureAwait(false);
+        var userId = user.Id;
 
-        return user.Id;
+        // AuthenticationProviderId is a scalar on the User row. CreateUserAsync + ChangePassword
+        // advance the concurrency token, so re-fetch + retry on conflict. Always force provider
+        // (RemoteAuth design — unlike OIDC which only sets it for new users).
+        await UpdateUserResilientAsync(
+            userId,
+            u => u.AuthenticationProviderId = typeof(Auth.RemoteAuthProvider).FullName!)
+            .ConfigureAwait(false);
+
+        // RBAC persists IsDisabled/permissions via UpdatePolicyAsync.
+        await _rbacService.ApplyRoleMappingsAsync(userId, roles).ConfigureAwait(false);
+
+        return userId;
+    }
+
+    internal async Task UpdateUserResilientAsync(Guid userId, Action<User> mutate)
+    {
+        const int maxAttempts = 3;
+        for (var attempt = 1; ; attempt++)
+        {
+            var user = _userManager.GetUserById(userId)
+                ?? throw new InvalidOperationException($"User '{userId}' not found during sync");
+
+            mutate(user);
+
+            try
+            {
+                await _userManager.UpdateUserAsync(user).ConfigureAwait(false);
+                return;
+            }
+            catch (Exception ex) when (attempt < maxAttempts
+                && ex.GetType().Name == "DbUpdateConcurrencyException")
+            {
+                _logger.LogWarning(
+                    "Concurrency conflict updating user {UserId} (attempt {Attempt}); retrying with a fresh copy",
+                    userId, attempt);
+            }
+        }
     }
 }

@@ -2,10 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Jellyfin.Data;
-using Jellyfin.Database.Implementations.Enums;
 using Jellyfin.Plugin.RemoteAuth.Configuration;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Model.Users;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.RemoteAuth.Services;
@@ -26,14 +25,19 @@ public class RbacService
         _logger = logger;
     }
 
-    public async Task ApplyRoleMappingsAsync(Guid userId, string[] userRoles)
+    public Task ApplyRoleMappingsAsync(Guid userId, string[] userRoles)
     {
         var config = RemoteAuthPlugin.Instance?.Configuration;
         if (config == null)
         {
-            return;
+            return Task.CompletedTask;
         }
 
+        return ApplyRoleMappingsAsync(userId, userRoles, config);
+    }
+
+    internal async Task ApplyRoleMappingsAsync(Guid userId, string[] userRoles, PluginConfiguration config)
+    {
         var user = _userManager.GetUserById(userId);
         if (user == null)
         {
@@ -41,39 +45,21 @@ public class RbacService
             return;
         }
 
-        var matchedMappings = config.RoleMappings
-            .Where(m => userRoles.Contains(m.RoleName, StringComparer.OrdinalIgnoreCase))
-            .OrderByDescending(m => m.Priority)
-            .ToList();
+        var match = RoleMatchResolver.Resolve(
+            config.RoleMappings,
+            config.DefaultRoleName,
+            config.AdminGroup,
+            userRoles);
 
-        if (matchedMappings.Count == 0 && !string.IsNullOrEmpty(config.DefaultRoleName))
+        if (match.Kind == RoleMatchKind.Deny)
         {
-            var defaultMapping = config.RoleMappings
-                .FirstOrDefault(m => string.Equals(m.RoleName, config.DefaultRoleName, StringComparison.OrdinalIgnoreCase));
-            if (defaultMapping != null)
+            if (match.RevokeAdminShortcut)
             {
-                matchedMappings.Add(defaultMapping);
-            }
-        }
-
-        if (matchedMappings.Count == 0)
-        {
-            if (IsAdminGroupMember(config, userRoles))
-            {
-                user.SetPermission(PermissionKind.IsAdministrator, true);
-                user.SetPermission(PermissionKind.EnableAllFolders, true);
-                await _userManager.UpdateUserAsync(user).ConfigureAwait(false);
-                _logger.LogInformation(
-                    "Applied AdminGroup shortcut for user {Username}: admin=true (group={AdminGroup})",
-                    user.Username,
-                    config.AdminGroup);
-            }
-            else if (!string.IsNullOrWhiteSpace(config.AdminGroup))
-            {
-                user.SetPermission(PermissionKind.IsAdministrator, false);
-                user.SetPermission(PermissionKind.EnableAllFolders, false);
-                user.SetPreference(PreferenceKind.EnabledFolders, Array.Empty<string>());
-                await _userManager.UpdateUserAsync(user).ConfigureAwait(false);
+                var revokePolicy = _userManager.GetUserDto(user).Policy;
+                revokePolicy.IsAdministrator = false;
+                revokePolicy.EnableAllFolders = false;
+                revokePolicy.EnabledFolders = Array.Empty<Guid>();
+                await _userManager.UpdatePolicyAsync(userId, revokePolicy).ConfigureAwait(false);
                 _logger.LogInformation(
                     "Revoked AdminGroup admin for user {Username} (group={AdminGroup})",
                     user.Username,
@@ -81,52 +67,76 @@ public class RbacService
             }
             else
             {
-                _logger.LogInformation("No role mappings matched for user {Username} with roles [{Roles}]",
-                    user.Username, string.Join(", ", userRoles));
+                _logger.LogInformation(
+                    "No role mappings matched for user {Username} with roles [{Roles}]",
+                    user.Username,
+                    string.Join(", ", userRoles));
             }
 
+            throw new InvalidOperationException(
+                $"No role mapping matched for user '{user.Username}'");
+        }
+
+        // Persistence MUST go through UpdatePolicyAsync: UpdateUserAsync only writes the root User
+        // row and silently drops Permission/Preference changes on Jellyfin 10.11+.
+        var policy = _userManager.GetUserDto(user).Policy;
+        policy.IsDisabled = false;
+
+        if (match.Kind == RoleMatchKind.AdminGroupOnly)
+        {
+            policy.IsAdministrator = true;
+            policy.EnableAllFolders = true;
+            policy.EnabledFolders = Array.Empty<Guid>();
+            await _userManager.UpdatePolicyAsync(userId, policy).ConfigureAwait(false);
+            _logger.LogInformation(
+                "Applied AdminGroup shortcut for user {Username}: admin=true (group={AdminGroup})",
+                user.Username,
+                config.AdminGroup);
             return;
         }
 
+        var matchedMappings = match.Mappings.ToList();
         var merged = MergeMappings(matchedMappings);
-
-        // AdminGroup shortcut: if config.AdminGroup is set and user is in it, force admin
         var isAdmin = merged.IsAdmin || IsAdminGroupMember(config, userRoles);
 
-        user.SetPermission(PermissionKind.IsAdministrator, isAdmin);
-        user.SetPermission(PermissionKind.EnableMediaPlayback, merged.EnableMediaPlayback);
-        user.SetPermission(PermissionKind.EnableRemoteAccess, merged.EnableRemoteAccess);
-        user.SetPermission(PermissionKind.EnableAudioPlaybackTranscoding, merged.EnableTranscoding);
-        user.SetPermission(PermissionKind.EnableVideoPlaybackTranscoding, merged.EnableTranscoding);
-        user.SetPermission(PermissionKind.EnableLiveTvAccess, merged.EnableLiveTv);
-        user.SetPermission(PermissionKind.EnableLiveTvManagement, merged.EnableLiveTvManagement);
-        user.SetPermission(PermissionKind.EnableContentDeletion, merged.EnableContentDeletion);
-        user.SetPermission(PermissionKind.EnableCollectionManagement, merged.EnableCollectionManagement);
-        user.SetPermission(PermissionKind.EnableSubtitleManagement, merged.EnableSubtitleManagement);
+        policy.IsAdministrator = isAdmin;
+        policy.EnableMediaPlayback = merged.EnableMediaPlayback;
+        policy.EnableRemoteAccess = merged.EnableRemoteAccess;
+        policy.EnableAudioPlaybackTranscoding = merged.EnableTranscoding;
+        policy.EnableVideoPlaybackTranscoding = merged.EnableTranscoding;
+        policy.EnableLiveTvAccess = merged.EnableLiveTv;
+        policy.EnableLiveTvManagement = merged.EnableLiveTvManagement;
+        policy.EnableContentDeletion = merged.EnableContentDeletion;
+        policy.EnableCollectionManagement = merged.EnableCollectionManagement;
+        policy.EnableSubtitleManagement = merged.EnableSubtitleManagement;
 
-        if (merged.EnableAllLibraries)
+        if (isAdmin || merged.EnableAllLibraries)
         {
-            user.SetPermission(PermissionKind.EnableAllFolders, true);
+            policy.EnableAllFolders = true;
+            policy.EnabledFolders = Array.Empty<Guid>();
         }
         else
         {
-            user.SetPermission(PermissionKind.EnableAllFolders, false);
-            var resolvedIds = ResolveLibraryIds(merged.LibraryIds, merged.LibraryNames);
-            user.SetPreference(PreferenceKind.EnabledFolders, resolvedIds.ToArray());
+            policy.EnableAllFolders = false;
+            policy.EnabledFolders = ResolveLibraryIds(merged.LibraryIds, merged.LibraryNames)
+                .Select(id => Guid.TryParse(id, out var g) ? (Guid?)g : null)
+                .Where(g => g.HasValue)
+                .Select(g => g!.Value)
+                .ToArray();
         }
 
         if (merged.MaxParentalRating.HasValue)
         {
-            user.MaxParentalRatingScore = merged.MaxParentalRating;
+            policy.MaxParentalRating = merged.MaxParentalRating;
         }
 
-        await _userManager.UpdateUserAsync(user).ConfigureAwait(false);
+        await _userManager.UpdatePolicyAsync(userId, policy).ConfigureAwait(false);
 
         _logger.LogInformation(
             "Applied RBAC for user {Username}: admin={IsAdmin}, libraries={LibraryCount}, roles matched=[{Roles}]",
             user.Username,
             isAdmin,
-            merged.EnableAllLibraries ? "ALL" : merged.LibraryIds.Count.ToString(),
+            isAdmin || merged.EnableAllLibraries ? "ALL" : policy.EnabledFolders.Length.ToString(),
             string.Join(", ", matchedMappings.Select(m => m.RoleName)));
     }
 

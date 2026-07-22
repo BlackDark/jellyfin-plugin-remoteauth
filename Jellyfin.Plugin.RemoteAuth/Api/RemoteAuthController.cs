@@ -1,9 +1,9 @@
 using System;
-using System.Security.Cryptography;
-using System.Text;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.RemoteAuth.Auth;
 using Jellyfin.Plugin.RemoteAuth.Services;
 using MediaBrowser.Controller.Authentication;
+using MediaBrowser.Controller.QuickConnect;
 using MediaBrowser.Controller.Session;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -17,15 +17,21 @@ public class RemoteAuthController : ControllerBase
 {
     private readonly UserSyncService _userSyncService;
     private readonly ISessionManager _sessionManager;
+    private readonly IQuickConnect _quickConnect;
+    private readonly StateManager _stateManager;
     private readonly ILogger<RemoteAuthController> _logger;
 
     public RemoteAuthController(
         UserSyncService userSyncService,
         ISessionManager sessionManager,
+        IQuickConnect quickConnect,
+        StateManager stateManager,
         ILogger<RemoteAuthController> logger)
     {
         _userSyncService = userSyncService;
         _sessionManager = sessionManager;
+        _quickConnect = quickConnect;
+        _stateManager = stateManager;
         _logger = logger;
     }
 
@@ -37,57 +43,16 @@ public class RemoteAuthController : ControllerBase
     [HttpGet("Login")]
     public async Task<ActionResult> Login()
     {
-        var config = RemoteAuthPlugin.Instance?.Configuration;
-
-        if (config == null || !config.Enabled)
+        var auth = TryAuthenticateHeaders();
+        if (auth.Error != null)
         {
-            return StatusCode(503, "Remote Auth plugin is disabled");
+            return auth.Error;
         }
 
-        // Validate shared secret — use constant-time comparison to prevent timing attacks
-        if (string.IsNullOrWhiteSpace(config.SecretHeaderValue))
-        {
-            _logger.LogWarning("RemoteAuth: SecretHeaderValue not configured — refusing all requests");
-            return StatusCode(503, "Remote Auth is not configured (missing secret)");
-        }
-
-        var secretHeaderName = string.IsNullOrWhiteSpace(config.SecretHeaderName)
-            ? "X-Remote-Auth-Secret"
-            : config.SecretHeaderName;
-
-        var incomingSecret = Request.Headers[secretHeaderName].ToString();
-
-        if (!ConstantTimeEquals(incomingSecret, config.SecretHeaderValue))
-        {
-            _logger.LogWarning("RemoteAuth: invalid or missing secret header from {RemoteIp}",
-                HttpContext.Connection.RemoteIpAddress);
-            return Unauthorized("Invalid or missing authentication secret");
-        }
-
-        // Read identity headers
-        var userHeader = string.IsNullOrWhiteSpace(config.UserHeader) ? "X-Remote-Auth-User" : config.UserHeader;
-        var username = Request.Headers[userHeader].ToString();
-
-        if (string.IsNullOrWhiteSpace(username))
-        {
-            _logger.LogWarning("RemoteAuth: username header '{Header}' missing or empty", userHeader);
-            return Unauthorized("Username header is missing");
-        }
-
-        var emailHeader = string.IsNullOrWhiteSpace(config.EmailHeader) ? "X-Remote-Auth-Email" : config.EmailHeader;
-        var nameHeader = string.IsNullOrWhiteSpace(config.DisplayNameHeader) ? "X-Remote-Auth-Name" : config.DisplayNameHeader;
-        var groupsHeader = string.IsNullOrWhiteSpace(config.GroupsHeader) ? "X-Remote-Auth-Groups" : config.GroupsHeader;
-        var delimiter = string.IsNullOrWhiteSpace(config.GroupsDelimiter) ? "|" : config.GroupsDelimiter;
-
-        var displayName = Request.Headers[nameHeader].ToString();
-        var groupsRaw = Request.Headers[groupsHeader].ToString();
-
-        var roles = string.IsNullOrWhiteSpace(groupsRaw)
-            ? Array.Empty<string>()
-            : groupsRaw.Split(delimiter, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-        _logger.LogInformation("RemoteAuth: authenticating user={Username}, groups=[{Groups}]",
-            username, string.Join(", ", roles));
+        var identity = auth.Identity!.Value;
+        var username = identity.Username;
+        var displayName = identity.DisplayName;
+        var roles = identity.Roles;
 
         try
         {
@@ -109,8 +74,15 @@ public class RemoteAuthController : ControllerBase
             };
 
             var authResult = await _sessionManager.AuthenticateDirect(authRequest).ConfigureAwait(false);
+            var basePath = GetBasePath();
 
-            return Content(BuildSuccessHtml(authResult), "text/html");
+            return Content(
+                SessionHtml.BuildSuccessHtml(
+                    authResult.AccessToken,
+                    authResult.User.Id.ToString(),
+                    authResult.ServerId,
+                    basePath),
+                "text/html");
         }
         catch (InvalidOperationException ex)
         {
@@ -125,71 +97,166 @@ public class RemoteAuthController : ControllerBase
     }
 
     /// <summary>
-    /// Constant-time string comparison to prevent timing-based secret inference.
-    /// Note: the early length check does leak whether lengths match, but this is
-    /// unavoidable without HMAC. For a shared secret this is acceptable — the
-    /// important property is that same-length secrets cannot be brute-forced
-    /// character-by-character via timing.
+    /// Trusted-header Quick Connect entry. Same secret + header validation as Login; returns
+    /// an HTML form for entering the code shown by a native/TV app.
     /// </summary>
-    private static bool ConstantTimeEquals(string a, string b)
+    [HttpGet("QuickConnect")]
+    public async Task<ActionResult> QuickConnect()
     {
-        if (a == null || b == null)
+        if (!_quickConnect.IsEnabled)
         {
-            return false;
+            return BadRequest("Quick Connect is not enabled on this server. An administrator can enable it under Dashboard > General.");
         }
 
-        var aBytes = Encoding.UTF8.GetBytes(a);
-        var bBytes = Encoding.UTF8.GetBytes(b);
-
-        if (aBytes.Length != bBytes.Length)
+        var auth = TryAuthenticateHeaders();
+        if (auth.Error != null)
         {
-            return false;
+            return auth.Error;
         }
 
-        return CryptographicOperations.FixedTimeEquals(aBytes, bBytes);
+        var identity = auth.Identity!.Value;
+        var username = identity.Username;
+        var displayName = identity.DisplayName;
+        var roles = identity.Roles;
+
+        try
+        {
+            var userId = await _userSyncService.SyncUserAsync(username, displayName, roles).ConfigureAwait(false);
+
+            var sessionToken = _stateManager.CreateAuthorizedSession(new AuthorizedSession
+            {
+                Username = username,
+                DisplayName = string.IsNullOrWhiteSpace(displayName) ? null : displayName,
+                Roles = roles,
+                UserId = userId
+            });
+
+            return Content(SessionHtml.BuildQuickConnectHtml(sessionToken, GetBasePath()), "text/html");
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning("RemoteAuth: Quick Connect sync failed for {Username}: {Message}", username, ex.Message);
+            return StatusCode(403, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "RemoteAuth: Quick Connect failed for user {Username}", username);
+            return StatusCode(500, "Authentication failed");
+        }
     }
 
-    private static string BuildSuccessHtml(AuthenticationResult authResult)
+    /// <summary>
+    /// Authorizes a pending Quick Connect request using the identity established by header auth.
+    /// </summary>
+    [HttpPost("QuickConnect/Authorize")]
+    public async Task<ActionResult> QuickConnectAuthorize([FromBody] QuickConnectAuthorizeRequest request)
     {
-        var accessToken = System.Text.Json.JsonSerializer.Serialize(authResult.AccessToken);
-        var userId = System.Text.Json.JsonSerializer.Serialize(authResult.User.Id.ToString());
-        var serverId = System.Text.Json.JsonSerializer.Serialize(authResult.ServerId);
+        if (request == null || string.IsNullOrWhiteSpace(request.Token) || string.IsNullOrWhiteSpace(request.Code))
+        {
+            return BadRequest("Missing session token or code");
+        }
 
-        return $$"""
-        <!DOCTYPE html>
-        <html>
-        <head><title>Authenticating...</title></head>
-        <body>
-        <p id="status">Completing authentication, please wait...</p>
-        <script>
-        (function() {
-            var accessToken = {{accessToken}};
-            var userId = {{userId}};
-            var serverId = {{serverId}};
+        var session = _stateManager.PeekAuthorizedSession(request.Token);
+        if (session == null)
+        {
+            return Unauthorized("Session expired. Please sign in again.");
+        }
 
-            var credentials = {
-                Servers: [{
-                    ManualAddress: window.location.origin,
-                    AccessToken: accessToken,
-                    UserId: userId,
-                    IsLocalUser: true
-                }]
-            };
-            localStorage.setItem('jellyfin_credentials', JSON.stringify(credentials));
+        if (!_quickConnect.IsEnabled)
+        {
+            return BadRequest("Quick Connect is not enabled on this server. An administrator can enable it under Dashboard > General.");
+        }
 
-            var user = {
-                Id: userId,
-                ServerId: serverId,
-                AccessToken: accessToken
-            };
-            localStorage.setItem('_jellyfin_user_' + serverId, JSON.stringify(user));
+        var code = request.Code.Trim();
 
-            document.getElementById('status').textContent = 'Done! Redirecting...';
-            window.location.href = '/';
-        })();
-        </script>
-        </body>
-        </html>
-        """;
+        try
+        {
+            var authorized = await _quickConnect.AuthorizeRequest(session.UserId, code).ConfigureAwait(false);
+            if (!authorized)
+            {
+                return BadRequest("Quick Connect authorization was rejected.");
+            }
+        }
+        catch (Exception ex) when (ex.GetType().Name == "ResourceNotFoundException")
+        {
+            return BadRequest("That code wasn't recognized. Check the code on your device and try again.");
+        }
+        catch (Exception ex) when (ex.GetType().Name == "AuthenticationException")
+        {
+            return BadRequest("Quick Connect is not active on this server.");
+        }
+
+        _stateManager.InvalidateAuthorizedSession(request.Token);
+        _logger.LogInformation("RemoteAuth: Quick Connect authorized for user {Username}", session.Username);
+
+        return Ok(new { success = true });
     }
+
+    private string GetBasePath()
+    {
+        return Request.PathBase.HasValue ? Request.PathBase.Value!.TrimEnd('/') : "";
+    }
+
+    /// <summary>
+    /// Shared secret + identity header validation for Login and QuickConnect.
+    /// </summary>
+    private (ActionResult? Error, (string Username, string DisplayName, string[] Roles)? Identity) TryAuthenticateHeaders()
+    {
+        var config = RemoteAuthPlugin.Instance?.Configuration;
+
+        if (config == null || !config.Enabled)
+        {
+            return (StatusCode(503, "Remote Auth plugin is disabled"), null);
+        }
+
+        if (string.IsNullOrWhiteSpace(config.SecretHeaderValue))
+        {
+            _logger.LogWarning("RemoteAuth: SecretHeaderValue not configured — refusing all requests");
+            return (StatusCode(503, "Remote Auth is not configured (missing secret)"), null);
+        }
+
+        var secretHeaderName = string.IsNullOrWhiteSpace(config.SecretHeaderName)
+            ? "X-Remote-Auth-Secret"
+            : config.SecretHeaderName;
+
+        var incomingSecret = Request.Headers[secretHeaderName].ToString();
+
+        if (!SecretComparer.Equals(incomingSecret, config.SecretHeaderValue))
+        {
+            _logger.LogWarning("RemoteAuth: invalid or missing secret header from {RemoteIp}",
+                HttpContext.Connection.RemoteIpAddress);
+            return (Unauthorized("Invalid or missing authentication secret"), null);
+        }
+
+        var userHeader = string.IsNullOrWhiteSpace(config.UserHeader) ? "X-Remote-Auth-User" : config.UserHeader;
+        var username = Request.Headers[userHeader].ToString();
+
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            _logger.LogWarning("RemoteAuth: username header '{Header}' missing or empty", userHeader);
+            return (Unauthorized("Username header is missing"), null);
+        }
+
+        var nameHeader = string.IsNullOrWhiteSpace(config.DisplayNameHeader) ? "X-Remote-Auth-Name" : config.DisplayNameHeader;
+        var groupsHeader = string.IsNullOrWhiteSpace(config.GroupsHeader) ? "X-Remote-Auth-Groups" : config.GroupsHeader;
+        var delimiter = string.IsNullOrWhiteSpace(config.GroupsDelimiter) ? "|" : config.GroupsDelimiter;
+
+        var displayName = Request.Headers[nameHeader].ToString();
+        var groupsRaw = Request.Headers[groupsHeader].ToString();
+
+        var roles = string.IsNullOrWhiteSpace(groupsRaw)
+            ? Array.Empty<string>()
+            : groupsRaw.Split(delimiter, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        _logger.LogInformation("RemoteAuth: authenticating user={Username}, groups=[{Groups}]",
+            username, string.Join(", ", roles));
+
+        return (null, (username, displayName, roles));
+    }
+}
+
+public class QuickConnectAuthorizeRequest
+{
+    public string Token { get; set; } = string.Empty;
+    public string Code { get; set; } = string.Empty;
 }

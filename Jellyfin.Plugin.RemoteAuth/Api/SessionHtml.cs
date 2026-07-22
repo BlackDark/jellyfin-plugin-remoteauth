@@ -1,0 +1,140 @@
+using System.Text.Json;
+
+namespace Jellyfin.Plugin.RemoteAuth.Api;
+
+public static class SessionHtml
+{
+    public static string BuildSuccessHtml(string accessToken, string userId, string serverId, string basePath)
+    {
+        var accessTokenJson = JsonSerializer.Serialize(accessToken);
+        var userIdJson = JsonSerializer.Serialize(userId);
+        var serverIdJson = JsonSerializer.Serialize(serverId);
+        var basePathJson = JsonSerializer.Serialize(basePath ?? "");
+        var redirectJson = JsonSerializer.Serialize((basePath ?? "") + "/");
+
+        return $$"""
+        <!DOCTYPE html>
+        <html>
+        <head><title>Authenticating...</title></head>
+        <body>
+        <p id="status">Completing authentication, please wait...</p>
+        <script>
+        (function() {
+            var accessToken = {{accessTokenJson}};
+            var userId = {{userIdJson}};
+            var serverId = {{serverIdJson}};
+
+            var credentials = {
+                Servers: [{
+                    ManualAddress: window.location.origin + {{basePathJson}},
+                    AccessToken: accessToken,
+                    UserId: userId,
+                    IsLocalUser: true
+                }]
+            };
+            localStorage.setItem('jellyfin_credentials', JSON.stringify(credentials));
+
+            var user = {
+                Id: userId,
+                ServerId: serverId,
+                AccessToken: accessToken
+            };
+            localStorage.setItem('_jellyfin_user_' + serverId, JSON.stringify(user));
+
+            document.getElementById('status').textContent = 'Done! Redirecting...';
+            window.location.href = {{redirectJson}};
+        })();
+        </script>
+        </body>
+        </html>
+        """;
+    }
+
+    public static string BuildQuickConnectHtml(string sessionToken, string basePath)
+    {
+        var basePathJson = JsonSerializer.Serialize(basePath ?? "");
+
+        return $$"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Quick Connect</title>
+        <style>
+            body { font-family: system-ui, -apple-system, sans-serif; background: #101010; color: #eee;
+                   display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+            .card { background: #1c1c1c; padding: 2em; border-radius: 8px; max-width: 360px; width: 90%;
+                    box-shadow: 0 4px 24px rgba(0,0,0,.5); text-align: center; }
+            h2 { margin-top: 0; }
+            p { color: #aaa; line-height: 1.5; }
+            input { width: 100%; box-sizing: border-box; font-size: 1.6em; letter-spacing: .3em;
+                    text-align: center; padding: .5em; margin: .5em 0 1em; border-radius: 4px;
+                    border: 1px solid #444; background: #111; color: #fff; }
+            button { width: 100%; padding: .8em; font-size: 1em; border: 0; border-radius: 4px;
+                     background: #00a4dc; color: #fff; cursor: pointer; }
+            button:disabled { opacity: .6; cursor: default; }
+            #msg { min-height: 1.4em; margin-top: 1em; }
+            .ok { color: #4caf50; }
+            .err { color: #f44336; }
+        </style>
+        </head>
+        <body>
+        <div class="card">
+            <h2>Quick Connect</h2>
+            <p>Enter the code shown on your device to finish signing in.</p>
+            <input id="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off"
+                   placeholder="000000" aria-label="Quick Connect code">
+            <button id="submit">Authorize</button>
+            <div id="msg"></div>
+        </div>
+        <script>
+        (function() {
+            const token = '{{sessionToken}}';
+            const basePath = {{basePathJson}};
+            const codeInput = document.getElementById('code');
+            const button = document.getElementById('submit');
+            const msg = document.getElementById('msg');
+
+            codeInput.focus();
+
+            function submit() {
+                const code = (codeInput.value || '').trim();
+                if (!code) { return; }
+                button.disabled = true;
+                msg.className = '';
+                msg.textContent = 'Authorizing...';
+
+                fetch(basePath + '/sso/RemoteAuth/QuickConnect/Authorize', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ Token: token, Code: code })
+                })
+                .then(function(r) {
+                    return r.text().then(function(body) {
+                        if (!r.ok) { throw new Error(body || ('Error ' + r.status)); }
+                    });
+                })
+                .then(function() {
+                    msg.className = 'ok';
+                    msg.textContent = 'Approved! Return to your device — it should sign in shortly.';
+                    codeInput.disabled = true;
+                })
+                .catch(function(err) {
+                    msg.className = 'err';
+                    msg.textContent = err.message;
+                    button.disabled = false;
+                    codeInput.focus();
+                    codeInput.select();
+                });
+            }
+
+            button.addEventListener('click', submit);
+            codeInput.addEventListener('keydown', function(e) { if (e.key === 'Enter') { submit(); } });
+        })();
+        </script>
+        </body>
+        </html>
+        """;
+    }
+}

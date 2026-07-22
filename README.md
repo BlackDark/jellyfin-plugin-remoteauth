@@ -154,17 +154,19 @@ Go to **Admin Dashboard → Plugins → Remote Auth**.
 | Secret Header Name | `X-Remote-Auth-Secret` | Name of the shared secret header |
 | Secret Header Value | *(empty)* | The shared secret — plugin refuses requests if blank |
 | Username Header | `X-Remote-Auth-User` | Header carrying the username |
-| Email Header | `X-Remote-Auth-Email` | Optional email header |
-| Display Name Header | `X-Remote-Auth-Name` | Optional display name header |
+| Email Header | `X-Remote-Auth-Email` | **Unused** — kept for proxy compat; not applied to Jellyfin users |
+| Display Name Header | `X-Remote-Auth-Name` | **Unused** — kept for proxy compat; not written to the user entity |
 | Groups Header | `X-Remote-Auth-Groups` | Header with pipe-delimited group list |
 | Groups Delimiter | `\|` | Delimiter used in the groups header |
 | Admin Group | *(empty)* | Shortcut: users in this group always get admin |
 | Auto-create Users | true | Create Jellyfin accounts on first login |
-| Default Role | *(empty)* | Fallback role mapping when no groups match |
+| Default Role | *(empty)* | Fallback role when no groups match; **blank = deny (403)** |
 
 ### Role Mappings Tab
 
 Map IdP group names to Jellyfin permissions. Multiple matched groups are merged (union semantics — most permissive wins).
+
+**Priority** sorts mappings for deterministic merge order only. Under union merge, a higher Priority does **not** exclude lower-priority roles — all matched mappings still contribute.
 
 ### Config File (Backup & Automation)
 
@@ -363,25 +365,44 @@ When a user matches multiple role mappings (because they're in multiple groups),
 
 ### Default Role
 
-If none of the user's groups match any role mapping, the **Default Role** (configured in General tab) is used as a fallback. Leave blank to deny access to unmatched users.
+If none of the user's groups match any role mapping, the **Default Role** (configured in General tab) is used as a fallback.
+
+- **Blank Default Role** → unmatched users get **403** and no session.
+- Access **auto-heals** on the next login once the IdP group matches a Role Mapping (or Default Role / Admin Group applies). No manual Jellyfin re-enable needed.
+
+See [MIGRATION.md](MIGRATION.md) for takeover / overwrite / disable behavior.
 
 ### AdminGroup Shortcut
 
-If **Admin Group** is set and a user is a member of that group, they receive `IsAdministrator = true` regardless of role mappings.
+If **Admin Group** is set and a user is a member of that group, they receive `IsAdministrator = true` (and all libraries) even with no other matched mappings. If Admin Group is set and the user is **not** in it (and no other match/Default Role), login is **403**.
 
-## TV Client Compatibility
+### Base URL
 
-Smart TV and mobile clients authenticate via `/Users/AuthenticateByName` (standard Jellyfin API) — they are **not affected** by this plugin. Remote Auth only manages the web-based SSO flow via `/sso/RemoteAuth/Login`.
+Login and Quick Connect HTML honor Jellyfin's **Base URL** / path prefix (`Request.PathBase`):
 
-Users managed by this plugin have password login disabled. If you need to allow TV clients for SSO users, you can either:
-- Set up the Jellyfin TV app with the session token from a web login (token sharing), or
-- Leave standard auth enabled for a separate TV-only account.
+- Session `ManualAddress` = `origin + basePath`
+- Redirect after login = `basePath + '/'`
+
+Deployments under a subpath (e.g. `https://example.com/jellyfin`) work without client-side path hacks.
+
+## Quick Connect (native / TV apps)
+
+Remote Auth users cannot use password login. For native and TV clients, use **Quick Connect**:
+
+1. Enable **Quick Connect** in Jellyfin (**Dashboard → General → Quick Connect**).
+2. Protect `/sso/RemoteAuth/QuickConnect` the same way as Login (proxy + secret + identity headers).
+3. Open `/sso/RemoteAuth/QuickConnect` in a browser behind the proxy (or have the proxy send the user there).
+4. Enter the Quick Connect code shown in the app; the plugin authorizes it via `POST /sso/RemoteAuth/QuickConnect/Authorize`.
+
+Same secret, username, and groups headers as Login. Unmatched users still get **403**.
 
 ## API Endpoints
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| GET | `/sso/RemoteAuth/Login` | Secret header | Header-based login (called by proxy) |
+| GET | `/sso/RemoteAuth/Login` | Secret header | Header-based web login (called by proxy) |
+| GET | `/sso/RemoteAuth/QuickConnect` | Secret header | QC UI after header auth + RBAC |
+| POST | `/sso/RemoteAuth/QuickConnect/Authorize` | Session token | Authorize a Quick Connect code |
 | GET | `/sso/RemoteAuth/Config/Libraries` | Admin | List available libraries |
 | GET | `/sso/RemoteAuth/Config/Status` | Admin | Plugin status |
 
@@ -400,9 +421,9 @@ Releases are automated with [release-please](https://github.com/googleapis/relea
 1. Push conventional commits to `main`
 2. release-please opens/updates a **Release PR** (version + `CHANGELOG.md`)
 3. Merge the Release PR → tag `v1.0.2` + GitHub release created
-4. `release.yml` builds the plugin zip, uploads assets, updates `manifest.json`
+4. `release.yml` builds the plugin zip, uploads assets, updates `manifest.json`, `build.yaml`, and `Jellyfin.Plugin.RemoteAuth/meta.json`
 
-Git tags use 3-part semver (`v1.0.2`). Jellyfin manifest uses 4-part plugin versions (`1.0.2.0`) — the release workflow pads automatically.
+Git tags use 3-part semver (`v1.0.2`). Jellyfin manifest / meta use 4-part plugin versions (`1.0.2.0`) — the release workflow pads automatically.
 
 ```bash
 make validate-manifest   # verify manifest URLs/checksums before shipping
@@ -435,13 +456,15 @@ Jellyfin.Plugin.RemoteAuth/
     configPage.html                # Admin UI (embedded)
     remoteauth.js                  # Admin UI JS (embedded)
   Api/
-    RemoteAuthController.cs        # /sso/RemoteAuth/Login
+    RemoteAuthController.cs        # Login + Quick Connect
+    SessionHtml.cs                 # Base-path-aware success / QC HTML
     ConfigController.cs            # Admin config API
   Auth/
     RemoteAuthProvider.cs          # Blocks password login for managed users
   Services/
     RbacService.cs                 # Group → permission mapping engine
     UserSyncService.cs             # User provisioning and sync
+    StateManager.cs                # Short-lived Quick Connect sessions
     ServiceRegistrator.cs          # DI registration
 ```
 
