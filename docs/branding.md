@@ -1,7 +1,19 @@
-# Jellyfin Branding Button
+# Jellyfin branding button
 
-You can add the following content to the upper box under Jellyfin/Branding and CSS part.
+Adds a "Sign in with SSO" button on the Jellyfin login page that opens `/sso/RemoteAuth/Login`.
 
+## Setup
+
+1. In Jellyfin: **Admin Dashboard → Branding**
+2. Paste the HTML into the custom login / disclaimer (upper) box
+3. Paste the CSS into the custom CSS box
+4. Save
+
+The button only works when the request goes through your reverse proxy with secret + identity headers on `GET /sso/RemoteAuth/Login`. Direct hits to Jellyfin without those headers fail auth.
+
+If Jellyfin uses a **Base URL** / subpath (for example `/jellyfin`), set the form action to that prefix + `/sso/RemoteAuth/Login` (for example `/jellyfin/sso/RemoteAuth/Login`).
+
+## HTML
 
 ```html
 <div class="remote-auth-login">
@@ -13,6 +25,8 @@ You can add the following content to the upper box under Jellyfin/Branding and C
   </form>
 </div>
 ```
+
+## CSS
 
 ```css
 .loginDisclaimerContainer,

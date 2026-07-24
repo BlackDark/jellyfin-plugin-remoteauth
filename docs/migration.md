@@ -1,4 +1,4 @@
-# Migration Notes — Remote Auth
+# Migration notes
 
 Behavior when enabling Remote Auth for existing Jellyfin users, or upgrading after stability fixes.
 
@@ -7,7 +7,7 @@ Behavior when enabling Remote Auth for existing Jellyfin users, or upgrading aft
 SSO username comes from the configured **Username Header** (default `X-Remote-Auth-User`). It must match the Jellyfin username **exactly** (case-sensitive Jellyfin lookup).
 
 - Existing local/LDAP users with the same username are **taken over** by Remote Auth on first successful SSO login.
-- No rename/alias mapping — change the IdP username or Jellyfin username to align.
+- No rename/alias mapping. Change the IdP username or Jellyfin username to align.
 
 ## Permission overwrite
 
@@ -23,14 +23,14 @@ Config: **Allow password login** (`AllowPasswordLogin`, default **on** = hybrid)
 | Mode | Behavior |
 |------|----------|
 | **On (hybrid)** | Do not force Remote Auth provider. Users stuck on `RemoteAuthProvider` are migrated back to Default on next successful SSO. Infuse/`AuthenticateByName` works if the Jellyfin password is known. |
-| **Off** | After successful RBAC, force `RemoteAuthProvider` — password login disabled. Use Quick Connect for native apps that support it. |
+| **Off** | After successful RBAC, force `RemoteAuthProvider`. Password login disabled. Use Quick Connect for native apps that support it. |
 
 - Web SSO always uses `AuthenticateDirect` (no password check) either way.
-- **New auto-created users** get a random unknown password — set one in Jellyfin (Dashboard → Users) before Infuse can log in.
+- **New auto-created users** get a random unknown password. Set one in Jellyfin (Dashboard → Users) before Infuse can log in.
 - Users who already had a Jellyfin password before Remote Auth takeover usually keep that hash after migration back to Default.
-- Hybrid password login **bypasses IdP MFA** — accepted tradeoff when the setting is on.
+- Hybrid password login **bypasses IdP MFA**. Accepted tradeoff when the setting is on.
 
-Native/TV apps with Quick Connect: `/sso/RemoteAuth/QuickConnect` (Jellyfin Quick Connect must be enabled). Infuse does **not** support Quick Connect — use hybrid password instead.
+Native/TV apps with Quick Connect: `/sso/RemoteAuth/QuickConnect` (Jellyfin Quick Connect must be enabled). Infuse does **not** support Quick Connect. Use hybrid password instead.
 
 ## Disabled users
 
@@ -43,7 +43,7 @@ On a **successful** mapped login, RBAC sets `IsDisabled = false`.
 
 If the user has **no** matching role mapping, **no** usable Default Role, and does not get access via Admin Group:
 
-- Login returns **403** — no session.
+- Login returns **403**. No session.
 - If **Admin Group** is configured and the user is not in it, admin/folder access from that shortcut is revoked before the 403.
 - If Admin Group is blank, existing Jellyfin permissions are left unchanged in the DB (still no session until a mapping matches).
 - Access **auto-heals** on the next login after the IdP grants a group that matches a Role Mapping (or Default Role / Admin Group applies).
