@@ -1,6 +1,6 @@
 [tools]
 zizmor = "1"
-dotnet = "9"
+dotnet = "10"
 
 [tasks.test]
 run = "dotnet test jellyfin-plugin-remote-auth.sln -c Release --nologo"
