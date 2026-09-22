@@ -1,6 +1,6 @@
 # Jellyfin Remote Auth Plugin
 
-Trusted-header SSO for Jellyfin (forward auth / remote user authentication).
+Trusted-header SSO for Jellyfin 12 (forward auth / remote user authentication).
 
 Use this when a reverse proxy (Authentik, Authelia, Traefik ForwardAuth, Caddy, …) already authenticates users and can inject identity headers. The plugin reads those headers, provisions the Jellyfin user, applies role-based library access, and issues a session.
 

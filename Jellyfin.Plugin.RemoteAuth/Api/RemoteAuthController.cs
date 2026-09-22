@@ -67,7 +67,7 @@ public class RemoteAuthController : ControllerBase
             var authRequest = new AuthenticationRequest
             {
                 App = "Jellyfin Web",
-                AppVersion = "10.11.0",
+                AppVersion = "12.0.0",
                 DeviceId = deviceId,
                 DeviceName = "RemoteAuth",
                 UserId = userId
