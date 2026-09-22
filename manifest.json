@@ -8,6 +8,14 @@
     "category": "Authentication",
     "versions": [
       {
+        "version": "2.0.0.0",
+        "changelog": "Release v2.0.0",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/BlackDark/jellyfin-plugin-remoteauth/releases/download/v2.0.0/remote-auth_2.0.0.0.zip",
+        "checksum": "131a8abb40f23d15f8913911248e1d77",
+        "timestamp": "2026-09-22T11:06:58Z"
+      },
+      {
         "version": "1.2.0.0",
         "changelog": "Release v1.2.0",
         "targetAbi": "10.11.0.0",
