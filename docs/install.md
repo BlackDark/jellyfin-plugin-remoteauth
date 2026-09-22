@@ -19,7 +19,7 @@ Catalog install (recommended) lives in the [README](../README.md#installation).
 
 ## From source
 
-Requires .NET 9 SDK **or** Docker:
+Requires .NET 10 SDK **or** Docker (Jellyfin 12):
 
 ```bash
 make build          # or: make docker-build
