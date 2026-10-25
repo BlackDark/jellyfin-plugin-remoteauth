@@ -82,3 +82,12 @@ jobs:
           inputs: "."
           online-audits: "false"
           advanced-security: "false"
+
+  check:
+    if: always()
+    needs: [build, validate-manifest, zizmor]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
