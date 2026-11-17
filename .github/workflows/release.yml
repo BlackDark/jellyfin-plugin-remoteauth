@@ -18,10 +18,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+      - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          dotnet-version: "11.0.x"
+          install_args: dotnet
+          cache: false
 
       - name: Extract version from tag
         if: startsWith(github.ref, 'refs/tags/v')

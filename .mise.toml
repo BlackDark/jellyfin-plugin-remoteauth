@@ -1,9 +1,19 @@
 [tools]
-zizmor = "1"
-dotnet = "10"
+actionlint = "1.7.12"
+zizmor = "1.32.0"
+dotnet = "11.0.100"
 
 [tasks.test]
+env = { DOTNET_ROLL_FORWARD = "Major" }
 run = "dotnet test jellyfin-plugin-remote-auth.sln -c Release --nologo"
 
 [tasks.build]
 run = "dotnet build jellyfin-plugin-remote-auth.sln -c Release --nologo"
+
+[tasks.check]
+description = "Build and test the plugin"
+env = { DOTNET_ROLL_FORWARD = "Major" }
+run = [
+  "dotnet build jellyfin-plugin-remote-auth.sln -c Release --nologo",
+  "dotnet test jellyfin-plugin-remote-auth.sln -c Release --nologo --no-build",
+]
