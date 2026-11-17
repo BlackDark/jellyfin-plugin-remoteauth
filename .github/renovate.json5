@@ -1,0 +1,14 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: ["github>blackdark/renovate-base//default.json5"],
+  rebaseWhen: "behind-base-branch",
+  separateMultipleMajor: true,
+  packageRules: [
+    {
+      description: "Majors: one PR each, merged by hand",
+      matchUpdateTypes: ["major"],
+      addLabels: ["major"],
+      automerge: false,
+    },
+  ],
+}
