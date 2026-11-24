@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/dotnet/sdk:11.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:11.0@sha256:2794448a07118a6eaf00f29ab5d2bf44928517ce5ff86505a63a69230374f599 AS build
 WORKDIR /src
 COPY Jellyfin.Plugin.RemoteAuth/Jellyfin.Plugin.RemoteAuth.csproj Jellyfin.Plugin.RemoteAuth/
 RUN dotnet restore Jellyfin.Plugin.RemoteAuth/Jellyfin.Plugin.RemoteAuth.csproj
